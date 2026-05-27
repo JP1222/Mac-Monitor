@@ -21,9 +21,12 @@ extension DashboardSnapshot {
         // surfaces its own CI workflow runs, closing the dogfood loop. User
         // can change this in the Settings sheet to monitor any repo their
         // PAT can read.
+        // Default repo: the real Yolo-Rollo monorepo. Switching this changes
+        // what the app monitors on first launch (before user opens Settings).
+        // The repo must be in the user's fine-grained PAT scope OR public.
         let repo = Repository(
             owner: "JP1222",
-            name: "Mac-Monitor",
+            name: "Yolo-Rollo",
             defaultBranch: "main"
         )
 

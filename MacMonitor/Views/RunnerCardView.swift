@@ -45,19 +45,23 @@ public struct RunnerCardView: View {
                 .font(MMFont.rounded(size: 13.5, weight: .bold))
                 .kerning(-0.1)
                 .foregroundStyle(MMTokens.ink)
-            Text(deviceHost)
+            Text(displayLabels)
                 .font(MMFont.mono(size: 11))
                 .foregroundStyle(MMTokens.inkFaint)
+                .lineLimit(1)
+                .truncationMode(.tail)
             Spacer()
             stateChip
         }
     }
 
-    private var deviceHost: String {
-        // The HTML mock displays "studio.local" — for a real multi-device
-        // setup the row would actually find the Device by ID and read .host,
-        // but for the per-runner card it stays a passthrough.
-        "studio.local"
+    /// Skip `self-hosted` (every self-hosted runner has it — redundant) and
+    /// join the rest with a middle dot. Falls back to the host-like
+    /// "studio.local" mock string only when no labels exist (shouldn't
+    /// happen with real GitHub data, but defensive for previews).
+    private var displayLabels: String {
+        let useful = runner.labels.filter { $0.lowercased() != "self-hosted" }
+        return useful.isEmpty ? "studio.local" : useful.joined(separator: " · ")
     }
 
     @ViewBuilder

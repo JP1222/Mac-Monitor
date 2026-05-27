@@ -19,7 +19,7 @@ public struct SettingsView: View {
     @EnvironmentObject private var viewModel: DashboardViewModel
 
     @State private var tokenInput: String = ""
-    @State private var repoSlug: String = "JP1222/Mac-Monitor"
+    @State private var repoSlug: String = "JP1222/Yolo-Rollo"
     @State private var saveStatus: SaveStatus = .idle
     @State private var existingTokenSuffix: String? = nil
 

@@ -1,17 +1,20 @@
 // SnapshotStore.swift
 //
 // The IPC channel between the menu bar app (writer) and the WidgetKit
-// extension (reader). Uses `UserDefaults(suiteName:)` against the App Group
-// because:
+// extension (reader). Uses a JSON FILE inside the App Group container
+// (NOT `UserDefaults`) because:
 //
-//   1. The snapshot is small (a few KB JSON) — well under UserDefaults' soft
-//      limit.
-//   2. UserDefaults is atomic per-key; we don't need to coordinate file locks.
-//   3. The widget process re-reads on every `getTimeline(in:)` call, so we
-//      pay for the disk hit at most once per refresh tick.
-//
-// If snapshots ever grow past ~500KB, switch to writing a JSON file inside
-// `FileManager.default.containerURL(forSecurityApplicationGroupIdentifier:)`.
+//   1. Sandboxed widget extensions can't reliably read App Group
+//      `UserDefaults` via `cfprefsd` — macOS rejects with
+//      "accessing preferences outside an application's container requires
+//      user-preference-read or file-read-data sandbox access".
+//      `containerURL(forSecurityApplicationGroupIdentifier:)` on the same
+//      group ID is sandbox-permitted for both processes, so file I/O works.
+//   2. Atomic write semantics via `Data.write(to:, options: .atomic)` —
+//      writer doesn't need locks; reader sees either old-full or new-full,
+//      never half-written.
+//   3. Survives any future grow in snapshot size (UserDefaults gets unhappy
+//      past ~1 MB; files are unbounded).
 //
 // The App Group ID is the single string we MUST keep in sync between
 // SnapshotStore, both .entitlements files, and project.yml. There is no
@@ -29,15 +32,22 @@ public enum SnapshotStore {
     /// `MacMonitor.entitlements` and `MacMonitorWidgets.entitlements`.
     public static let appGroupID = "group.com.jp1222.macmonitor"
 
-    /// Key inside the App Group's UserDefaults suite.
-    public static let snapshotKey = "dashboard.snapshot.v1"
+    /// File name for the JSON snapshot inside the App Group container.
+    public static let snapshotFilename = "dashboard.snapshot.v1.json"
 
     /// Widget kind name — used by `WidgetCenter.reloadTimelines(ofKind:)` to
     /// target our widgets specifically.
     public static let widgetKind = "MacMonitorWidgets"
 
-    private static var defaults: UserDefaults? {
-        UserDefaults(suiteName: appGroupID)
+    /// `Library/Application Support/` under the App Group container — the
+    /// canonical place for app-private persistent data per Apple's guidance.
+    /// Created on first write.
+    private static var snapshotURL: URL? {
+        guard let container = containerURL else { return nil }
+        return container
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent(snapshotFilename)
     }
 
     // MARK: - Read
@@ -45,9 +55,8 @@ public enum SnapshotStore {
     /// Read the latest snapshot, or `nil` if none has been written yet (first
     /// launch) or if the JSON is incompatible with the current schema version.
     public static func read() -> DashboardSnapshot? {
-        guard let defaults, let data = defaults.data(forKey: snapshotKey) else {
-            return nil
-        }
+        guard let url = snapshotURL else { return nil }
+        guard let data = try? Data(contentsOf: url) else { return nil }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         do {
@@ -77,21 +86,32 @@ public enum SnapshotStore {
     /// Persist a snapshot and ping WidgetCenter so widgets pick it up on the
     /// next system refresh cycle. Safe to call from any thread.
     public static func write(_ snapshot: DashboardSnapshot) {
-        guard let defaults else {
+        guard let url = snapshotURL else {
             #if DEBUG
             print("[SnapshotStore] no App Group container — check entitlements")
             #endif
             return
         }
+
+        // Ensure the directory exists (first write of a fresh install).
+        let dir = url.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(
+            at: dir,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         do {
             let data = try encoder.encode(snapshot)
-            defaults.set(data, forKey: snapshotKey)
+            // .atomic = write to temp file then rename → readers never see a
+            // half-written file. Critical when the widget process polls.
+            try data.write(to: url, options: .atomic)
             reloadWidgets()
         } catch {
             #if DEBUG
-            print("[SnapshotStore] encode failed: \(error)")
+            print("[SnapshotStore] encode/write failed: \(error)")
             #endif
         }
     }
@@ -114,5 +134,11 @@ public enum SnapshotStore {
 
     public static var isAppGroupConfigured: Bool {
         containerURL != nil
+    }
+
+    /// Human-readable path to the snapshot file (or "—" if container missing).
+    /// Useful for surfacing in Settings → diagnostics.
+    public static var snapshotPath: String {
+        snapshotURL?.path ?? "—"
     }
 }

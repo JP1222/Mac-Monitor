@@ -23,6 +23,10 @@ public protocol GitHubClienting: Sendable {
     func fetchInProgressJobs(for repository: Repository) async throws -> [WorkflowJob]
     func fetchQueuedJobs(for repository: Repository) async throws -> [QueueItem]
     func fetchRecentRuns(for repository: Repository, limit: Int) async throws -> [RecentRun]
+    /// Per-runner most-recent completed job. Keyed by `runner_name` (matches
+    /// `Runner.name`). Returned map only contains runners that actually ran a
+    /// job in the scanned window — missing keys = no recent activity.
+    func fetchLastJobsByRunner(for repository: Repository, scanRuns: Int) async throws -> [String: LastJobSummary]
 }
 
 // MARK: - Mock implementation
@@ -44,6 +48,12 @@ public struct MockGitHubClient: GitHubClienting {
     }
     public func fetchRecentRuns(for repository: Repository, limit: Int) async throws -> [RecentRun] {
         Array(DashboardSnapshot.mock.recent.prefix(limit))
+    }
+    public func fetchLastJobsByRunner(for repository: Repository, scanRuns: Int) async throws -> [String: LastJobSummary] {
+        Dictionary(uniqueKeysWithValues: DashboardSnapshot.mock.runners.compactMap { r -> (String, LastJobSummary)? in
+            guard let lj = r.lastJob else { return nil }
+            return (r.name, lj)
+        })
     }
 }
 
@@ -176,6 +186,55 @@ public struct GitHubClient: GitHubClienting {
             .prefix(limit)
             .map { $0.toRecentRun() }
     }
+
+    public func fetchLastJobsByRunner(for repository: Repository, scanRuns: Int) async throws -> [String: LastJobSummary] {
+        // 1. Pull the most recent COMPLETED runs (skip in-progress — those
+        //    have no completion time so they can't represent "last job").
+        //    Scan more than we strictly need because not every run uses a
+        //    self-hosted runner (Discord notify, lint-only, etc.).
+        let req = try endpoint(
+            "/repos/\(repository.slug)/actions/runs",
+            queryItems: [
+                URLQueryItem(name: "status",   value: "completed"),
+                URLQueryItem(name: "per_page", value: String(min(100, max(1, scanRuns)))),
+            ]
+        )
+        let runs = try await decode(APIRunsResponse.self, from: req).workflow_runs
+
+        // 2. Concurrently fetch jobs for every run.
+        var allJobs: [APIWorkflowJob] = []
+        await withTaskGroup(of: [APIWorkflowJob].self) { group in
+            for run in runs {
+                group.addTask {
+                    do {
+                        let r = try endpoint("/repos/\(repository.slug)/actions/runs/\(run.id)/jobs")
+                        return try await decode(APIJobsResponse.self, from: r).jobs
+                    } catch {
+                        return []
+                    }
+                }
+            }
+            for await batch in group { allJobs.append(contentsOf: batch) }
+        }
+
+        // 3. Group by runner_name, keep the most recently completed job per runner.
+        var result: [String: LastJobSummary] = [:]
+        for job in allJobs {
+            guard let runnerName = job.runner_name, !runnerName.isEmpty,
+                  let completedAt = job.completed_at,
+                  let startedAt = job.started_at else { continue }
+            let summary = LastJobSummary(
+                result: job.toJobResult(),
+                finishedAt: completedAt,
+                durationSeconds: max(1, Int(completedAt.timeIntervalSince(startedAt)))
+            )
+            if let existing = result[runnerName], existing.finishedAt >= summary.finishedAt {
+                continue
+            }
+            result[runnerName] = summary
+        }
+        return result
+    }
 }
 
 // MARK: - GitHub REST DTOs
@@ -270,6 +329,19 @@ private struct APIWorkflowJob: Decodable {
     let started_at: Date?
     let completed_at: Date?
     let html_url: URL
+    /// GitHub fills this on jobs that ran on a self-hosted runner. Null for
+    /// jobs that ran on cloud runners (or never ran).
+    let runner_name: String?
+
+    func toJobResult() -> JobResult {
+        switch conclusion {
+        case "success":  return .success
+        case "failure":  return .failure
+        case "cancelled":return .cancelled
+        case "skipped":  return .skipped
+        default:         return .building
+        }
+    }
 
     func toDomain(run: APIWorkflowRun, repository: Repository) -> WorkflowJob {
         // GitHub doesn't report a real "% complete" — we report 0.5 as a

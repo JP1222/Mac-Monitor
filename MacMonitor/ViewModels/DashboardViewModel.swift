@@ -145,22 +145,45 @@ public final class DashboardViewModel: ObservableObject {
             .sorted { $0.finishedAt > $1.finishedAt }
         let deviceSnapshots = await deviceSnapshotsTask
 
-        // Also pull in-progress jobs and stitch them onto busy runners. The
-        // runners endpoint reports `busy: true` but doesn't tell us WHICH
-        // job a runner is on; we approximate by handing the first available
-        // job to the first busy runner.
-        async let jobsTask = withTaskGroup(of: [WorkflowJob].self) { group -> [WorkflowJob] in
+        // Pull in-progress jobs (for currently-building runners) AND a map
+        // of each runner's most-recent completed job (for idle/offline
+        // runners). Both are independent of the runner list endpoint —
+        // GitHub doesn't denormalize that data, so we stitch it client-side.
+        async let inProgressJobsTask = withTaskGroup(of: [WorkflowJob].self) { group -> [WorkflowJob] in
             for repo in repositories {
                 group.addTask { (try? await github.fetchInProgressJobs(for: repo)) ?? [] }
             }
             return await group.reduce(into: []) { $0.append(contentsOf: $1) }
         }
-        var availableJobs = await jobsTask
+        async let lastJobsTask = withTaskGroup(of: [String: LastJobSummary].self) { group -> [String: LastJobSummary] in
+            for repo in repositories {
+                group.addTask { (try? await github.fetchLastJobsByRunner(for: repo, scanRuns: 20)) ?? [:] }
+            }
+            // Merge maps from all repos; if same runner_name appears in multiple
+            // repos keep the newest.
+            return await group.reduce(into: [:]) { acc, partial in
+                for (name, summary) in partial {
+                    if let existing = acc[name], existing.finishedAt >= summary.finishedAt {
+                        continue
+                    }
+                    acc[name] = summary
+                }
+            }
+        }
+        var availableJobs = await inProgressJobsTask
+        let lastJobsByRunner = await lastJobsTask
 
         let runners = runnersFromAPI.map { runner -> Runner in
-            guard runner.state == .building, !availableJobs.isEmpty else { return runner }
             var attached = runner
-            attached.currentJob = availableJobs.removeFirst()
+            // Building? Attach an in-progress job.
+            if runner.state == .building, !availableJobs.isEmpty {
+                attached.currentJob = availableJobs.removeFirst()
+            }
+            // Always try to attach lastJob if we have one for this runner —
+            // makes idle/offline cards informative instead of empty.
+            if let last = lastJobsByRunner[runner.name] {
+                attached.lastJob = last
+            }
             return attached
         }
 
