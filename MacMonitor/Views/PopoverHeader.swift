@@ -35,7 +35,10 @@ public struct PopoverHeader: View {
                 Task { await viewModel.refresh() }
             }
             iconButton(systemName: "gearshape", help: "Settings") {
-                // TODO: open Settings scene
+                // Open Settings via AppKit (LSUIElement apps can't open
+                // SwiftUI Window scenes). The popover dismisses as the
+                // window takes focus, which is fine.
+                SettingsWindowController.show(viewModel: viewModel)
             }
         }
         .padding(.horizontal, 14)

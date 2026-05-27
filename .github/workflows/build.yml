@@ -1,0 +1,54 @@
+# Build CI — runs `xcodebuild build` for the MacMonitor scheme on every push
+# and pull request. The point isn't deep test coverage yet; it's:
+#
+#   1. Catch Swift compile errors before they land on main.
+#   2. Validate the Xcode project regenerates cleanly from `project.yml`.
+#   3. Give MacMonitor (the menu bar app itself) something to display in its
+#      popover — every push to this repo produces a real workflow_run that
+#      the app's GitHub client surfaces to the user. Dogfood loop.
+#
+# Code signing is disabled in CI because the runner doesn't have access to
+# the user's personal team certificate (and we don't want to bake one in).
+# This means the CI build won't actually be runnable, just compilable —
+# which is what we care about for catching regressions.
+
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:  # lets you trigger it manually from the Actions tab
+
+jobs:
+  build:
+    name: Build (macOS-latest)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build MacMonitor (app + widget extension)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -scheme MacMonitor \
+            -project MacMonitor.xcodeproj \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            -skipMacroValidation \
+            build | tail -120

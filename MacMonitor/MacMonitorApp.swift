@@ -17,8 +17,16 @@ struct MacMonitorApp: App {
 
     // The single source of truth — owned at the App level so the popover and
     // any future settings window share the same state.
+    //
+    // GitHub client: real GitHubClient — reads PAT from Keychain on every
+    // call. If no PAT is configured yet (first run, fresh install), the
+    // client surfaces `Error.missingToken` and the ViewModel keeps showing
+    // the last cached snapshot (or the mock if there's no cache). The
+    // Settings sheet in the popover header lets the user paste a PAT.
+    //
+    // Agent client: still mocked until the Mac-mini agent daemon ships.
     @StateObject private var viewModel = DashboardViewModel(
-        github: MockGitHubClient(),
+        github: GitHubClient(),
         agent: MockAgentClient(),
         refreshInterval: 15
     )
@@ -30,5 +38,8 @@ struct MacMonitorApp: App {
                 .onAppear { viewModel.start() }
         }
         .menuBarExtraStyle(.window)
+        // Settings is shown via AppKit NSWindow (see SettingsWindowController)
+        // rather than a SwiftUI `Window` scene because LSUIElement apps can't
+        // open Window scenes — the .accessory activation policy blocks it.
     }
 }

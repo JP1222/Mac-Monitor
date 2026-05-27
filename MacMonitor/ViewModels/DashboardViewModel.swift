@@ -135,11 +135,31 @@ public final class DashboardViewModel: ObservableObject {
             return try await group.reduce(into: []) { $0.append($1) }
         }
 
-        let runners = try await runnersTask
+        let runnersFromAPI = try await runnersTask
         let queue = try await queueTask
         let recent = try await recentTask
             .sorted { $0.finishedAt > $1.finishedAt }
         let deviceSnapshots = try await deviceSnapshotsTask
+
+        // Also pull in-progress jobs and stitch them onto busy runners. The
+        // runners endpoint reports `busy: true` but doesn't tell us WHICH
+        // job a runner is on; we approximate by handing the first available
+        // job to the first busy runner. For multi-runner farms a richer
+        // match (by labels or job's `runner_name` field) would be a follow-up.
+        async let jobsTask = withThrowingTaskGroup(of: [WorkflowJob].self) { group -> [WorkflowJob] in
+            for repo in repositories {
+                group.addTask { try await github.fetchInProgressJobs(for: repo) }
+            }
+            return try await group.reduce(into: []) { $0.append(contentsOf: $1) }
+        }
+        var availableJobs = try await jobsTask
+
+        let runners = runnersFromAPI.map { runner -> Runner in
+            guard runner.state == .building, !availableJobs.isEmpty else { return runner }
+            var attached = runner
+            attached.currentJob = availableJobs.removeFirst()
+            return attached
+        }
 
         let aggregate = DashboardSnapshot.computeAggregateState(
             runners: runners,

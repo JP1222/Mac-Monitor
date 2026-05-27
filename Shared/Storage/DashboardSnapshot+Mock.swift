@@ -17,9 +17,13 @@ extension DashboardSnapshot {
     public static let mock: DashboardSnapshot = {
         let now = Date()
 
+        // Default to monitoring this very repo — that way the menu bar app
+        // surfaces its own CI workflow runs, closing the dogfood loop. User
+        // can change this in the Settings sheet to monitor any repo their
+        // PAT can read.
         let repo = Repository(
             owner: "JP1222",
-            name: "yolo-rollo",
+            name: "Mac-Monitor",
             defaultBranch: "main"
         )
 

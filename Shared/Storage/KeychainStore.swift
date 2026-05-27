@@ -1,0 +1,134 @@
+// KeychainStore.swift
+//
+// Thin wrapper around the Security framework's generic-password APIs. Stores
+// the GitHub PAT in the sandboxed app's keychain (a per-bundle Data Vault),
+// which means:
+//
+//   - The keychain item is NOT accessible to other apps or the `security`
+//     CLI — only this signed bundle can read it.
+//   - No `keychain-access-groups` entitlement is required.
+//   - The item survives app reinstalls (keychain persists separately from the
+//     app bundle and DerivedData).
+//   - Encrypted at rest using the user's account password as the KEK; the
+//     OS unlocks the keychain when the user logs in.
+//
+// The user supplies the PAT through the Settings sheet — see SettingsView.
+// We never accept the PAT through the chat or environment to keep it from
+// being captured in logs or git history.
+
+import Foundation
+import Security
+
+public enum KeychainStore {
+
+    /// Service identifier — opaque to the user; pick something unique to this
+    /// app so it doesn't collide with anything else in the keychain.
+    public static let githubTokenService = "MacMonitor.GitHubToken"
+
+    /// We only ever have one GitHub token per install — the account label is
+    /// cosmetic (shows up in Keychain Access.app if the user inspects), not
+    /// a primary key.
+    public static let githubTokenAccount = "github.com"
+
+    public enum KeychainError: Error, LocalizedError {
+        case unhandled(OSStatus)
+        case decodeFailure
+
+        public var errorDescription: String? {
+            switch self {
+            case .unhandled(let status):
+                return "Keychain error (OSStatus \(status))"
+            case .decodeFailure:
+                return "Keychain returned data that wasn't UTF-8"
+            }
+        }
+    }
+
+    // MARK: - GitHub token
+
+    public static func saveGitHubToken(_ token: String) throws {
+        // Trim whitespace defensively — copy-paste from 1Password sometimes
+        // grabs a trailing newline.
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        try set(value: trimmed, service: githubTokenService, account: githubTokenAccount)
+    }
+
+    public static func readGitHubToken() -> String? {
+        try? get(service: githubTokenService, account: githubTokenAccount)
+    }
+
+    public static func deleteGitHubToken() throws {
+        try delete(service: githubTokenService, account: githubTokenAccount)
+    }
+
+    public static var hasGitHubToken: Bool {
+        readGitHubToken()?.isEmpty == false
+    }
+
+    // MARK: - Generic CRUD
+
+    /// `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`: the token is
+    /// available as soon as the user has logged in once after boot, and is
+    /// pinned to THIS device (won't sync via iCloud Keychain). Good default
+    /// for a build-monitor token — you wouldn't want it on your phone.
+    private static let accessible = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+
+    private static func set(value: String, service: String, account: String) throws {
+        guard let data = value.data(using: .utf8) else { throw KeychainError.decodeFailure }
+
+        // Try update first; if no existing item, fall through to add.
+        let query: [String: Any] = [
+            kSecClass as String:        kSecClassGenericPassword,
+            kSecAttrService as String:  service,
+            kSecAttrAccount as String:  account,
+        ]
+        let update: [String: Any] = [
+            kSecValueData as String:    data,
+            kSecAttrAccessible as String: accessible,
+        ]
+        let status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+        switch status {
+        case errSecSuccess:
+            return
+        case errSecItemNotFound:
+            var add = query
+            add[kSecValueData as String]    = data
+            add[kSecAttrAccessible as String] = accessible
+            let addStatus = SecItemAdd(add as CFDictionary, nil)
+            guard addStatus == errSecSuccess else { throw KeychainError.unhandled(addStatus) }
+        default:
+            throw KeychainError.unhandled(status)
+        }
+    }
+
+    private static func get(service: String, account: String) throws -> String {
+        let query: [String: Any] = [
+            kSecClass as String:        kSecClassGenericPassword,
+            kSecAttrService as String:  service,
+            kSecAttrAccount as String:  account,
+            kSecReturnData as String:   true,
+            kSecMatchLimit as String:   kSecMatchLimitOne,
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess else { throw KeychainError.unhandled(status) }
+        guard let data = result as? Data,
+              let string = String(data: data, encoding: .utf8) else {
+            throw KeychainError.decodeFailure
+        }
+        return string
+    }
+
+    private static func delete(service: String, account: String) throws {
+        let query: [String: Any] = [
+            kSecClass as String:        kSecClassGenericPassword,
+            kSecAttrService as String:  service,
+            kSecAttrAccount as String:  account,
+        ]
+        let status = SecItemDelete(query as CFDictionary)
+        // errSecItemNotFound is fine — already gone.
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw KeychainError.unhandled(status)
+        }
+    }
+}
