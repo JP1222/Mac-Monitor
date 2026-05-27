@@ -15,62 +15,74 @@ public struct PopoverView: View {
     public init() {}
 
     public var body: some View {
-        // Plain VStack — no ScrollView — lets MenuBarExtra(.window) size the
-        // popover to its natural content height. ScrollView collapses to its
-        // minimum (0) inside a window-style menu bar extra, which is why the
-        // sections were invisible. If snapshots ever grow past one screen we
-        // can revisit with `.frame(minHeight: 300, idealHeight: 500)` to
-        // anchor the ScrollView's ideal size.
+        // Pattern that works inside MenuBarExtra(.window):
+        //   - Outer VStack: PopoverHeader + ScrollView + QuickActionsBar
+        //     (header and footer always visible — don't scroll out of view)
+        //   - ScrollView: middle sections, capped at maxHeight so the popover
+        //     can't grow past one screen
+        //   - Inner VStack: `.fixedSize(vertical:true)` so it reports its
+        //     natural content height — when content < maxHeight the popover
+        //     shrinks to fit; when > maxHeight the inner VStack scrolls.
+        //
+        // The cap height of 560 leaves room on a 13" MacBook screen after
+        // header (50pt) + footer (54pt) + window chrome.
         VStack(spacing: 0) {
             PopoverHeader()
-            MMSection(title: "Runners") {
-                VStack(spacing: 8) {
-                    ForEach(viewModel.snapshot.runners) { runner in
-                        RunnerCardView(runner: runner)
-                    }
-                }
-            }
-            MMSection(
-                title: "Queue · \(viewModel.snapshot.queue.count) waiting",
-                action: {
-                    if viewModel.snapshot.longestWaitingSeconds > 0 {
-                        Text("longest \(viewModel.snapshot.longestWaitingSeconds)s")
-                            .font(MMFont.rounded(size: 11, weight: .semibold))
-                            .foregroundStyle(MMTokens.amber)
-                    } else {
-                        EmptyView()
-                    }
-                }
-            ) {
-                VStack(spacing: 0) {
-                    ForEach(Array(viewModel.snapshot.queue.enumerated()), id: \.element.id) { i, q in
-                        QueueRowView(item: q, isLongest: i == 0 && viewModel.snapshot.queue.count > 0)
-                    }
-                }
-            }
 
-            MMSection(
-                title: "Recent runs",
-                action: {
-                    Text("View all on GitHub ›")
-                        .font(MMFont.rounded(size: 11))
-                        .foregroundStyle(MMTokens.inkMuted)
-                }
-            ) {
+            ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 0) {
-                    ForEach(viewModel.snapshot.recent.prefix(5)) { run in
-                        RecentRunRowView(run: run)
+                    MMSection(title: "Runners") {
+                        VStack(spacing: 8) {
+                            ForEach(viewModel.snapshot.runners) { runner in
+                                RunnerCardView(runner: runner)
+                            }
+                        }
                     }
-                }
-            }
+                    MMSection(
+                        title: "Queue · \(viewModel.snapshot.queue.count) waiting",
+                        action: {
+                            if viewModel.snapshot.longestWaitingSeconds > 0 {
+                                Text("longest \(viewModel.snapshot.longestWaitingSeconds)s")
+                                    .font(MMFont.rounded(size: 11, weight: .semibold))
+                                    .foregroundStyle(MMTokens.amber)
+                            } else {
+                                EmptyView()
+                            }
+                        }
+                    ) {
+                        VStack(spacing: 0) {
+                            ForEach(Array(viewModel.snapshot.queue.enumerated()), id: \.element.id) { i, q in
+                                QueueRowView(item: q, isLongest: i == 0 && viewModel.snapshot.queue.count > 0)
+                            }
+                        }
+                    }
 
-            MMSection(title: "Storage · three-layer", divider: false) {
-                VStack(spacing: 9) {
-                    ForEach(viewModel.snapshot.primaryDisks) { disk in
-                        DiskMeterView(disk: disk)
+                    MMSection(
+                        title: "Recent runs",
+                        action: {
+                            Text("View all on GitHub ›")
+                                .font(MMFont.rounded(size: 11))
+                                .foregroundStyle(MMTokens.inkMuted)
+                        }
+                    ) {
+                        VStack(spacing: 0) {
+                            ForEach(viewModel.snapshot.recent.prefix(5)) { run in
+                                RecentRunRowView(run: run)
+                            }
+                        }
+                    }
+
+                    MMSection(title: "Storage · three-layer", divider: false) {
+                        VStack(spacing: 9) {
+                            ForEach(viewModel.snapshot.primaryDisks) { disk in
+                                DiskMeterView(disk: disk)
+                            }
+                        }
                     }
                 }
+                .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxHeight: 560)
 
             QuickActionsBar()
                 .environmentObject(viewModel)

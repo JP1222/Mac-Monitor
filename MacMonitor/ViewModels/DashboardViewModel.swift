@@ -173,11 +173,26 @@ public final class DashboardViewModel: ObservableObject {
         var availableJobs = await inProgressJobsTask
         let lastJobsByRunner = await lastJobsTask
 
+        // Build per-workflow historical average durations from the recent
+        // success runs. Used to give each in-progress job a real progress
+        // estimate (elapsed/avg) instead of the hardcoded 50% placeholder.
+        var avgDurationByWorkflow: [String: Int] = [:]
+        let successfulByWorkflow = Dictionary(grouping: recent.filter { $0.result == .success }, by: { $0.workflow })
+        for (workflow, runs) in successfulByWorkflow where !runs.isEmpty {
+            let sample = runs.prefix(10)   // last 10 successful runs
+            avgDurationByWorkflow[workflow] = sample.map { $0.durationSeconds }.reduce(0, +) / sample.count
+        }
+
         let runners = runnersFromAPI.map { runner -> Runner in
             var attached = runner
-            // Building? Attach an in-progress job.
+            // Building? Attach an in-progress job + recompute its progress
+            // and ETA from historical averages of the same workflow.
             if runner.state == .building, !availableJobs.isEmpty {
-                attached.currentJob = availableJobs.removeFirst()
+                var job = availableJobs.removeFirst()
+                let avg = avgDurationByWorkflow[job.workflow]
+                job.progress = job.estimatedProgress(historicalAvgSeconds: avg)
+                job.etaSeconds = job.estimatedEtaSeconds(historicalAvgSeconds: avg)
+                attached.currentJob = job
             }
             // Always try to attach lastJob if we have one for this runner —
             // makes idle/offline cards informative instead of empty.

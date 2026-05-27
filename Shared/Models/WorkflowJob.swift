@@ -64,4 +64,22 @@ public struct WorkflowJob: Codable, Identifiable, Hashable, Sendable {
     public func elapsedSeconds(now: Date = Date()) -> Int {
         max(0, Int(now.timeIntervalSince(startedAt)))
     }
+
+    /// Estimate progress 0...1 from historical average duration of the same
+    /// workflow. GitHub Actions doesn't expose a real "percent complete" —
+    /// the closest approximation is `elapsed / average_of_last_N_successful_runs`.
+    /// Capped at 0.95 so the bar never reads 100% before the build actually
+    /// finishes (which would feel like a lie when ETA blows past).
+    public func estimatedProgress(historicalAvgSeconds: Int?, now: Date = Date()) -> Double {
+        guard let avg = historicalAvgSeconds, avg > 0 else { return 0.5 }
+        let elapsed = elapsedSeconds(now: now)
+        return min(0.95, max(0.02, Double(elapsed) / Double(avg)))
+    }
+
+    /// Same calculation, but returns remaining seconds. Negative when the
+    /// build is running longer than its historical average (returns 0).
+    public func estimatedEtaSeconds(historicalAvgSeconds: Int?, now: Date = Date()) -> Int? {
+        guard let avg = historicalAvgSeconds, avg > 0 else { return nil }
+        return max(0, avg - elapsedSeconds(now: now))
+    }
 }
