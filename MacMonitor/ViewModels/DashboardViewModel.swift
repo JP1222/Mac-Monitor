@@ -36,9 +36,13 @@ public final class DashboardViewModel: ObservableObject {
 
     private let github: GitHubClienting
     private let agent: AgentClienting
-    private let refreshInterval: TimeInterval
+    /// Initial refresh interval from constructor. After `start()` this is
+    /// superseded by `UserSettings.refreshIntervalSeconds` and changes when
+    /// the user picks a different interval in Settings.
+    private let initialRefreshInterval: TimeInterval
 
     private var timerCancellable: AnyCancellable?
+    private var settingsObserver: AnyCancellable?
 
     public init(
         github: GitHubClienting = MockGitHubClient(),
@@ -47,7 +51,7 @@ public final class DashboardViewModel: ObservableObject {
     ) {
         self.github = github
         self.agent = agent
-        self.refreshInterval = refreshInterval
+        self.initialRefreshInterval = refreshInterval
         // Seed from disk so the popover and widgets render instantly on launch.
         self.snapshot = SnapshotStore.readOrMock()
     }
@@ -60,9 +64,16 @@ public final class DashboardViewModel: ObservableObject {
         // Fire once immediately so the UI updates without waiting `refreshInterval`.
         Task { await refresh() }
 
-        timerCancellable = Timer.publish(every: refreshInterval, on: .main, in: .common)
-            .autoconnect()
+        restartTimer()
+
+        // Listen for Settings changes — repo list edit / interval picker /
+        // iCloud sync from another device. Cheap re-subscribe is fine; debounce
+        // could be added later if Settings emits rapidly.
+        settingsObserver = NotificationCenter.default
+            .publisher(for: UserSettings.didChangeNotification)
+            .receive(on: RunLoop.main)
             .sink { [weak self] _ in
+                self?.restartTimer()
                 Task { [weak self] in await self?.refresh() }
             }
     }
@@ -70,6 +81,18 @@ public final class DashboardViewModel: ObservableObject {
     public func stop() {
         timerCancellable?.cancel()
         timerCancellable = nil
+        settingsObserver?.cancel()
+        settingsObserver = nil
+    }
+
+    private func restartTimer() {
+        timerCancellable?.cancel()
+        let interval = TimeInterval(UserSettings.refreshIntervalSeconds)
+        timerCancellable = Timer.publish(every: interval, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                Task { [weak self] in await self?.refresh() }
+            }
     }
 
     // MARK: - Refresh pipeline
@@ -85,11 +108,16 @@ public final class DashboardViewModel: ObservableObject {
     }
 
     private func composeSnapshot() async -> DashboardSnapshot {
-        // Use whatever the previous snapshot knew about — topology rarely
-        // changes mid-session, so we treat repositories/devices as durable.
-        let repositories = snapshot.repositories.isEmpty
+        // Repos come from UserSettings (iCloud-synced). Devices currently come
+        // from the mock (until the local agent ships).
+        let repositories: [Repository] = UserSettings.repositorySlugs.compactMap { slug -> Repository? in
+            let parts = slug.split(separator: "/", maxSplits: 1)
+            guard parts.count == 2 else { return nil }
+            return Repository(owner: String(parts[0]), name: String(parts[1]))
+        }
+        let resolvedRepos = repositories.isEmpty
             ? DashboardSnapshot.mock.repositories
-            : snapshot.repositories
+            : repositories
         let devices = snapshot.devices.isEmpty
             ? DashboardSnapshot.mock.devices
             : snapshot.devices
@@ -111,19 +139,19 @@ public final class DashboardViewModel: ObservableObject {
         // runners can't be enumerated. Throwing a single error used to take
         // out the entire dashboard.
         async let runnersTask = withTaskGroup(of: [Runner].self) { group -> [Runner] in
-            for repo in repositories {
+            for repo in resolvedRepos {
                 group.addTask { (try? await github.fetchRunners(for: repo)) ?? [] }
             }
             return await group.reduce(into: []) { $0.append(contentsOf: $1) }
         }
         async let queueTask = withTaskGroup(of: [QueueItem].self) { group -> [QueueItem] in
-            for repo in repositories {
+            for repo in resolvedRepos {
                 group.addTask { (try? await github.fetchQueuedJobs(for: repo)) ?? [] }
             }
             return await group.reduce(into: []) { $0.append(contentsOf: $1) }
         }
         async let recentTask = withTaskGroup(of: [RecentRun].self) { group -> [RecentRun] in
-            for repo in repositories {
+            for repo in resolvedRepos {
                 group.addTask { (try? await github.fetchRecentRuns(for: repo, limit: 10)) ?? [] }
             }
             return await group.reduce(into: []) { $0.append(contentsOf: $1) }
@@ -150,13 +178,13 @@ public final class DashboardViewModel: ObservableObject {
         // runners). Both are independent of the runner list endpoint —
         // GitHub doesn't denormalize that data, so we stitch it client-side.
         async let inProgressJobsTask = withTaskGroup(of: [WorkflowJob].self) { group -> [WorkflowJob] in
-            for repo in repositories {
+            for repo in resolvedRepos {
                 group.addTask { (try? await github.fetchInProgressJobs(for: repo)) ?? [] }
             }
             return await group.reduce(into: []) { $0.append(contentsOf: $1) }
         }
         async let lastJobsTask = withTaskGroup(of: [String: LastJobSummary].self) { group -> [String: LastJobSummary] in
-            for repo in repositories {
+            for repo in resolvedRepos {
                 group.addTask { (try? await github.fetchLastJobsByRunner(for: repo, scanRuns: 20)) ?? [:] }
             }
             // Merge maps from all repos; if same runner_name appears in multiple
@@ -211,7 +239,7 @@ public final class DashboardViewModel: ObservableObject {
 
         return DashboardSnapshot(
             generatedAt: Date(),
-            repositories: repositories,
+            repositories: resolvedRepos,
             devices: devices,
             runners: runners,
             queue: queue,

@@ -1,16 +1,16 @@
 // SettingsView.swift
 //
-// Modal sheet for one-off configuration: GitHub PAT entry, repo slug, and
-// status of the wiring. Surfaced from PopoverHeader's gear button.
+// Standalone window (hosted via SettingsWindowController, NOT a popover
+// sheet — see that file for why) where the user configures:
 //
-// UX notes:
-//   - Token is rendered with `SecureField` so it's masked in the UI and not
-//     captured by Screen Recording (per Apple's guidance).
-//   - We confirm save + show the masked tail of the stored token (last 4
-//     chars), which lets the user verify they pasted the right one without
-//     re-exposing it.
-//   - Saving writes to Keychain via KeychainStore; the field is then
-//     cleared so it doesn't linger in memory longer than needed.
+//   - GitHub PAT (stored in Keychain via KeychainStore)
+//   - Repositories to monitor (multi-line, persisted via UserSettings →
+//     iCloud + UserDefaults)
+//   - Refresh interval (segmented picker, persisted)
+//   - Touch ID gate (toggle, persisted)
+//
+// The repo + interval changes post `UserSettings.didChangeNotification`,
+// which DashboardViewModel listens for and triggers an immediate refresh.
 
 import SwiftUI
 
@@ -19,7 +19,9 @@ public struct SettingsView: View {
     @EnvironmentObject private var viewModel: DashboardViewModel
 
     @State private var tokenInput: String = ""
-    @State private var repoSlug: String = "JP1222/Yolo-Rollo"
+    @State private var reposText: String = ""
+    @State private var refreshInterval: Int = 15
+    @State private var touchIDGate: Bool = false
     @State private var saveStatus: SaveStatus = .idle
     @State private var existingTokenSuffix: String? = nil
 
@@ -39,7 +41,9 @@ public struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     repoSection
+                    refreshSection
                     tokenSection
+                    securitySection
                     statusSection
                 }
                 .padding(.horizontal, 22)
@@ -49,10 +53,10 @@ public struct SettingsView: View {
             Divider().background(MMTokens.glassDivider)
             footer
         }
-        .frame(width: 460, height: 480)
+        .frame(width: 480, height: 620)
         .background(MMTokens.glassStrong)
         .foregroundStyle(MMTokens.ink)
-        .onAppear(perform: refreshTokenStatus)
+        .onAppear(perform: loadCurrentValues)
     }
 
     // MARK: - Header
@@ -63,7 +67,7 @@ public struct SettingsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Mac Monitor · Settings")
                     .font(MMFont.rounded(size: 14, weight: .bold))
-                Text("GitHub credentials live in your Keychain")
+                Text("Synced via iCloud · token in Keychain")
                     .font(MMFont.rounded(size: 11))
                     .foregroundStyle(MMTokens.inkSoft)
             }
@@ -73,15 +77,17 @@ public struct SettingsView: View {
         .padding(.vertical, 14)
     }
 
-    // MARK: - Repo section
+    // MARK: - Repo section (multi-line)
 
     private var repoSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Repository").mmEyebrow()
-            TextField("owner/name", text: $repoSlug)
-                .textFieldStyle(.plain)
+            Text("Repositories").mmEyebrow()
+            // TextEditor for multi-line input — one slug per line.
+            TextEditor(text: $reposText)
                 .font(MMFont.mono(size: 13))
-                .padding(8)
+                .scrollContentBackground(.hidden)
+                .padding(6)
+                .frame(minHeight: 70, maxHeight: 110)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(MMTokens.rgba(255, 255, 255, 0.06))
@@ -90,9 +96,30 @@ public struct SettingsView: View {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .stroke(MMTokens.glassBorder, lineWidth: 1)
                 )
-            Text("Workflow runs, queued jobs and self-hosted runners come from this repository.")
+            Text("One `owner/name` per line. Workflow runs, queued jobs and self-hosted runners from each repo are merged into the dashboard.")
                 .font(MMFont.rounded(size: 11))
                 .foregroundStyle(MMTokens.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - Refresh interval
+
+    private var refreshSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Refresh interval").mmEyebrow()
+            Picker("", selection: $refreshInterval) {
+                Text("15s").tag(15)
+                Text("30s").tag(30)
+                Text("1m").tag(60)
+                Text("5m").tag(300)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            Text("How often MacMonitor polls GitHub. Tighter intervals burn API quota faster (5000 req/hr authenticated).")
+                .font(MMFont.rounded(size: 11))
+                .foregroundStyle(MMTokens.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -123,7 +150,7 @@ public struct SettingsView: View {
                         .stroke(MMTokens.glassBorder, lineWidth: 1)
                 )
 
-            Text("Paste a fine-grained PAT scoped to this repo with Actions: Read + Administration: Read + Metadata: Read. Stored in the macOS Keychain, never in plain files.")
+            Text("Fine-grained PAT with Actions: Read + Administration: Read + Metadata: Read scoped to the repos above. Stored in the macOS Keychain.")
                 .font(MMFont.rounded(size: 11))
                 .foregroundStyle(MMTokens.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
@@ -134,6 +161,24 @@ public struct SettingsView: View {
                     .foregroundStyle(MMTokens.blue)
                     .padding(.top, 2)
             }
+        }
+    }
+
+    // MARK: - Security
+
+    private var securitySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Security").mmEyebrow()
+            Toggle(isOn: $touchIDGate) {
+                Text("Require Touch ID to read token from Keychain")
+                    .font(MMFont.rounded(size: 11.5))
+                    .foregroundStyle(MMTokens.ink)
+            }
+            .toggleStyle(.switch)
+            Text("When enabled, MacMonitor prompts for Touch ID before fetching the token at app launch. Off by default — the Keychain item is already access-controlled to this app and device.")
+                .font(MMFont.rounded(size: 10.5))
+                .foregroundStyle(MMTokens.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -148,7 +193,7 @@ public struct SettingsView: View {
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(MMTokens.mint)
-                Text("Token saved to Keychain. Refreshing dashboard…")
+                Text("Saved. Refreshing dashboard…")
                     .font(MMFont.rounded(size: 11.5))
                     .foregroundStyle(MMTokens.ink)
             }
@@ -191,7 +236,7 @@ public struct SettingsView: View {
                 )
 
             Button(action: save) {
-                Text("Save token")
+                Text("Save")
                     .font(MMFont.rounded(size: 12, weight: .semibold))
                     .foregroundStyle(MMTokens.ink)
                     .padding(.horizontal, 16)
@@ -202,8 +247,6 @@ public struct SettingsView: View {
                     )
             }
             .buttonStyle(.plain)
-            .disabled(tokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .opacity(tokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.4 : 1)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 12)
@@ -211,17 +254,36 @@ public struct SettingsView: View {
 
     // MARK: - Actions
 
+    private func loadCurrentValues() {
+        reposText = UserSettings.repositorySlugs.joined(separator: "\n")
+        refreshInterval = UserSettings.refreshIntervalSeconds
+        touchIDGate = UserSettings.touchIDGateEnabled
+        refreshTokenStatus()
+    }
+
     private func save() {
-        do {
-            try KeychainStore.saveGitHubToken(tokenInput)
-            saveStatus = .saved
-            tokenInput = ""    // clear input field so token isn't in memory
-            refreshTokenStatus()
-            // Kick a refresh so the UI immediately reflects the new token.
-            Task { await viewModel.refresh() }
-        } catch {
-            saveStatus = .error(error.localizedDescription)
+        // Token (only if user typed something — empty field means "don't change").
+        if !tokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            do {
+                try KeychainStore.saveGitHubToken(tokenInput)
+                tokenInput = ""
+            } catch {
+                saveStatus = .error(error.localizedDescription)
+                return
+            }
         }
+        // Repos.
+        let parsed = reposText
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        UserSettings.repositorySlugs = parsed
+        UserSettings.refreshIntervalSeconds = refreshInterval
+        UserSettings.touchIDGateEnabled = touchIDGate
+
+        refreshTokenStatus()
+        saveStatus = .saved
+        Task { await viewModel.refresh() }
     }
 
     private func refreshTokenStatus() {

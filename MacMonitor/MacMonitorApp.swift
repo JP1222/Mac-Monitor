@@ -31,6 +31,13 @@ struct MacMonitorApp: App {
         refreshInterval: 15
     )
 
+    init() {
+        // Start observing iCloud settings sync so changes made on another
+        // Mac sign in here. Safe to call unconditionally — falls back to
+        // local UserDefaults if iCloud is unavailable.
+        UserSettings.startObservingICloud()
+    }
+
     var body: some Scene {
         MenuBarExtra("Mac Monitor", systemImage: "hexagon.fill") {
             PopoverView()
