@@ -1,5 +1,7 @@
 # Mac Monitor
 
+[![Build](https://github.com/JP1222/Mac-Monitor/actions/workflows/build.yml/badge.svg)](https://github.com/JP1222/Mac-Monitor/actions/workflows/build.yml)
+
 A SwiftUI menu bar app + WidgetKit desktop widgets for monitoring self-hosted
 GitHub Actions runners on a Mac mini build farm.
 
