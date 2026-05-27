@@ -168,8 +168,11 @@ public struct GitHubClient: GitHubClienting {
             ]
         )
         let runs = try await decode(APIRunsResponse.self, from: req).workflow_runs
+        // We include in-progress runs too — they map to `.building` and show
+        // a spinner glyph in the popover. This makes the dogfood loop feel
+        // immediate: push commit → CI starts → popover lights up within the
+        // next refresh tick, instead of waiting for completion.
         return runs
-            .filter { $0.conclusion != nil }   // skip in-progress runs here
             .prefix(limit)
             .map { $0.toRecentRun() }
     }
