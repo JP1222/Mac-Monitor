@@ -171,10 +171,16 @@ public struct GitHubClient: GitHubClienting {
     }
 
     public func fetchRecentRuns(for repository: Repository, limit: Int) async throws -> [RecentRun] {
+        // Fetch MORE than `limit` because we filter out skipped runs (which
+        // are usually conditional notify-on-failure workflows that do
+        // nothing on a healthy main — high frequency, zero signal). Without
+        // overfetching we could end up with fewer than `limit` rows in the
+        // popover.
+        let fetchCount = min(100, max(limit * 3, 20))
         let req = try endpoint(
             "/repos/\(repository.slug)/actions/runs",
             queryItems: [
-                URLQueryItem(name: "per_page", value: String(min(100, max(1, limit)))),
+                URLQueryItem(name: "per_page", value: String(fetchCount)),
             ]
         )
         let runs = try await decode(APIRunsResponse.self, from: req).workflow_runs
@@ -183,6 +189,7 @@ public struct GitHubClient: GitHubClienting {
         // immediate: push commit → CI starts → popover lights up within the
         // next refresh tick, instead of waiting for completion.
         return runs
+            .filter { $0.conclusion != "skipped" }   // drop conditional notify-on-failure noise
             .prefix(limit)
             .map { $0.toRecentRun() }
     }
