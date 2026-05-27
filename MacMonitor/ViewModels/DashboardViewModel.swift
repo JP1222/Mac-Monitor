@@ -101,11 +101,30 @@ public final class DashboardViewModel: ObservableObject {
         isRefreshing = true
         defer { isRefreshing = false }
 
+        // composeSnapshot is per-endpoint-resilient so it never throws, but
+        // it CAN return a degraded snapshot if e.g. the PAT is missing or
+        // every API call 401s. Surface a user-facing message in that case.
         let composed = await composeSnapshot()
         self.snapshot = composed
-        self.lastError = nil
         SnapshotStore.write(composed)
+
+        // Heuristic: if we ended up with zero runners + zero recent runs and
+        // we DO have repos configured, something fetch-side is wrong. The
+        // most common culprit is missing/expired PAT or scope mismatch.
+        if composed.runners.isEmpty && composed.recent.isEmpty
+            && !composed.repositories.isEmpty {
+            if KeychainStore.readGitHubToken() == nil {
+                self.lastError = "No GitHub token in Keychain. Open Settings to add one."
+            } else {
+                self.lastError = "GitHub returned no data. Check your PAT scope covers \(composed.repositories.map(\.slug).joined(separator: ", "))."
+            }
+        } else {
+            self.lastError = nil
+        }
     }
+
+    /// Public so the PopoverHeader's banner dismiss button can clear it.
+    public func dismissError() { lastError = nil }
 
     private func composeSnapshot() async -> DashboardSnapshot {
         // Repos come from UserSettings (iCloud-synced). Devices currently come

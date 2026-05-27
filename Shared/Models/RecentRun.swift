@@ -15,6 +15,9 @@ public struct RecentRun: Codable, Identifiable, Hashable, Sendable {
     public let durationSeconds: Int
     public let finishedAt: Date
     public let failureReason: String?   // shown when result == .failure
+    /// Clickable URL to the run on github.com. Optional so old snapshots
+    /// (pre-v2) decode without breaking; new snapshots always set it.
+    public let htmlURL: URL?
 
     public init(
         result: JobResult,
@@ -24,7 +27,8 @@ public struct RecentRun: Codable, Identifiable, Hashable, Sendable {
         commitSHA: String,
         durationSeconds: Int,
         finishedAt: Date,
-        failureReason: String? = nil
+        failureReason: String? = nil,
+        htmlURL: URL? = nil
     ) {
         self.result = result
         self.workflow = workflow
@@ -34,6 +38,7 @@ public struct RecentRun: Codable, Identifiable, Hashable, Sendable {
         self.durationSeconds = durationSeconds
         self.finishedAt = finishedAt
         self.failureReason = failureReason
+        self.htmlURL = htmlURL
     }
 
     /// Pretty duration: `3m 14s`.

@@ -25,7 +25,8 @@ public struct ResultGlyph: View {
     private var background: Color {
         switch result {
         case .success: return MMTokens.mintGlow
-        case .failure, .cancelled: return MMTokens.tomatoGlow
+        case .failure: return MMTokens.tomatoGlow
+        case .cancelled: return MMTokens.rgba(255, 255, 255, 0.08)
         case .building: return MMTokens.blueGlow
         case .queued, .skipped: return MMTokens.rgba(255, 255, 255, 0.06)
         }
@@ -38,10 +39,17 @@ public struct ResultGlyph: View {
             Image(systemName: "checkmark")
                 .font(.system(size: size * 0.55, weight: .heavy))
                 .foregroundStyle(MMTokens.mint)
-        case .failure, .cancelled:
+        case .failure:
             Image(systemName: "xmark")
                 .font(.system(size: size * 0.45, weight: .heavy))
                 .foregroundStyle(MMTokens.tomato)
+        case .cancelled:
+            // ⊘ minus-circle to distinguish from a real failure — the build
+            // didn't run to completion (user/system cancelled), not the same
+            // as "your code is broken".
+            Image(systemName: "minus")
+                .font(.system(size: size * 0.55, weight: .heavy))
+                .foregroundStyle(MMTokens.inkMuted)
         case .building:
             // Spinner: a partial ring rotating.
             TimelineView(.animation) { ctx in

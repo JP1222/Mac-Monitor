@@ -322,7 +322,8 @@ private struct APIWorkflowRun: Decodable {
             commitSHA: String(head_sha.prefix(7)),
             durationSeconds: max(1, Int(updated_at.timeIntervalSince(started))),
             finishedAt: updated_at,
-            failureReason: nil
+            failureReason: nil,
+            htmlURL: html_url
         )
     }
 }

@@ -28,6 +28,8 @@ public struct PopoverView: View {
         // header (50pt) + footer (54pt) + window chrome.
         VStack(spacing: 0) {
             PopoverHeader()
+            ErrorBanner()
+                .environmentObject(viewModel)
 
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 0) {
