@@ -72,6 +72,42 @@ the widget will fall back to mock data forever.
 rate limit (5000 req/hr authenticated). With 1 repo × 4 endpoints × 4 req/min
 you're at ~16 req/min = 960/hr, safely under limit.
 
+## Troubleshooting: "the menu bar icon doesn't appear"
+
+If you launched MacMonitor and can't find the hexagon icon in your menu bar,
+**verify the app is alive before assuming the icon is broken**:
+
+```sh
+# 1. App actually running?
+ps aux | grep "MacMonitor.app/Contents/MacOS" | grep -v grep
+
+# 2. macOS sees it as a registered background-only app?
+osascript -e 'tell application "System Events" to get name of every process whose background only is true' \
+  | tr ',' '\n' | grep -i macmonitor
+```
+
+If MacMonitor appears in BOTH lists, the SwiftUI `MenuBarExtra` registration
+succeeded — the icon is *somewhere* in your menu bar.
+
+Most common reason you can't see it: a third-party menu bar manager is hiding
+it. Scan for them:
+
+```sh
+ps aux | grep -iE "bartender|ice|dozer|barhider|vanilla|hidden" | grep -v grep
+```
+
+Bartender / Ice / Dozer / Hidden Bar default to **hiding new menu bar items**
+until you explicitly promote them. Click the manager's chevron, find the
+MacMonitor hexagon, and pin it to the always-visible section.
+
+If none of the above apply, also rule out:
+
+- **MacBook with notch + crowded menu bar**: macOS hides items that don't fit.
+  Try fewer items via System Settings → Control Center.
+- **`lsappinfo info -only StatusLabel <pid>` returns NULL** is NOT a bug —
+  SwiftUI MenuBarExtra uses a private status item subsystem that `lsappinfo`
+  doesn't enumerate. NULL there does not mean "not registered".
+
 ## Adding a new widget size
 
 For `accessoryRectangular` (Lock Screen on iOS) or `systemExtraLarge` (iPad):

@@ -101,6 +101,12 @@ public final class DashboardViewModel: ObservableObject {
             ? DashboardSnapshot.mock.devices
             : snapshot.devices
 
+        // Capture into local constants so the task-group closures don't have
+        // to capture `self`. Both protocols are `Sendable` so the locals can
+        // safely cross the actor boundary into the detached child tasks.
+        let github = self.github
+        let agent = self.agent
+
         // Fan out to GitHub for each repository.
         async let runnersTask = withThrowingTaskGroup(of: [Runner].self) { group -> [Runner] in
             for repo in repositories {

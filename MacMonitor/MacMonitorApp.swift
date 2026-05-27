@@ -24,16 +24,10 @@ struct MacMonitorApp: App {
     )
 
     var body: some Scene {
-        MenuBarExtra {
+        MenuBarExtra("Mac Monitor", systemImage: "hexagon.fill") {
             PopoverView()
                 .environmentObject(viewModel)
                 .onAppear { viewModel.start() }
-                .onDisappear { /* keep the timer running in background */ }
-        } label: {
-            // SwiftUI custom view as the menu bar icon. The aggregate state
-            // drives the dot tone so users see "something's building" /
-            // "something failed" at a glance without opening the popover.
-            RunnerMenuBarGlyph(aggregate: viewModel.snapshot.aggregateState, size: 17)
         }
         .menuBarExtraStyle(.window)
     }

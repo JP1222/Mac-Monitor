@@ -52,11 +52,14 @@ public struct MockGitHubClient: GitHubClienting {
 /// `SecItemAdd` keyed by service "MacMonitor.GitHubToken".
 public struct GitHubClient: GitHubClienting {
     public let session: URLSession
-    public let token: () -> String?
+    /// `@Sendable` so this whole struct can conform to `Sendable` — required
+    /// for it to be safely captured into the detached child tasks the
+    /// DashboardViewModel spawns.
+    public let token: @Sendable () -> String?
 
     public init(
         session: URLSession = .shared,
-        token: @escaping () -> String? = { ProcessInfo.processInfo.environment["GITHUB_TOKEN"] }
+        token: @escaping @Sendable () -> String? = { ProcessInfo.processInfo.environment["GITHUB_TOKEN"] }
     ) {
         self.session = session
         self.token = token

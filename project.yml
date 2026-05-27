@@ -29,9 +29,15 @@ settings:
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     ENABLE_HARDENED_RUNTIME: YES
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_TEAM: ""  # fill in your Apple Developer team ID, or leave blank for local-only signing
+    DEVELOPMENT_TEAM: "73W26RY42S"  # JP1222's personal team (843072690@qq.com)
     SWIFT_STRICT_CONCURRENCY: minimal
     GENERATE_INFOPLIST_FILE: YES
+    # Modern Xcode reads version from build settings, not Info.plist. Both
+    # targets MUST use the same values or the widget extension is rejected
+    # at registration time ("CFBundleVersion of an app extension must match
+    # that of its containing parent app").
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
 
 # Shared sources are compiled into BOTH targets directly (single-source-of-truth
 # without a separate framework). For a bigger project we'd promote Shared/ to a
