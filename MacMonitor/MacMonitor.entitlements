@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- App sandbox is required for App Store distribution. WidgetKit
+         extensions can only share data with their containing app via an App
+         Group container; both targets must declare the SAME group ID. -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+
+    <!-- Outbound HTTP to GitHub Actions API + the local Mac-mini agent. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- App Group: shared UserDefaults + container directory between the
+         menu bar app (writer) and the widget extension (reader). -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.com.jp1222.macmonitor</string>
+    </array>
+</dict>
+</plist>

@@ -1,0 +1,86 @@
+# XcodeGen project spec — source of truth for MacMonitor.xcodeproj.
+#
+# Why XcodeGen: a multi-target macOS project (menu bar app + WidgetKit
+# extension + shared sources) generates a 2000-line pbxproj that is unreadable
+# and merge-hostile. Defining the project in YAML keeps the actual structure
+# diff-friendly and makes it trivial to add targets later (notch companion,
+# helper agent, share extension).
+#
+# Bootstrap once on a fresh checkout:
+#   brew install xcodegen
+#   xcodegen generate
+#   open MacMonitor.xcodeproj
+#
+# The generated .xcodeproj is gitignored on purpose — regenerate, don't edit.
+
+name: MacMonitor
+options:
+  bundleIdPrefix: com.jp1222
+  deploymentTarget:
+    macOS: "14.0"  # Sonoma — required for desktop widgets + MenuBarExtra.window style
+  developmentLanguage: en
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  defaultConfig: Debug
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    ENABLE_HARDENED_RUNTIME: YES
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""  # fill in your Apple Developer team ID, or leave blank for local-only signing
+    SWIFT_STRICT_CONCURRENCY: minimal
+    GENERATE_INFOPLIST_FILE: YES
+
+# Shared sources are compiled into BOTH targets directly (single-source-of-truth
+# without a separate framework). For a bigger project we'd promote Shared/ to a
+# Swift Package; at this scale duplicating compilation is simpler and avoids the
+# embed/sign dance widget extensions require for embedded frameworks.
+targets:
+  MacMonitor:
+    type: application
+    platform: macOS
+    sources:
+      - path: MacMonitor
+      - path: Shared
+    resources:
+      - path: MacMonitor/Assets.xcassets
+        optional: true
+    info:
+      path: MacMonitor/Info.plist
+      properties:
+        LSUIElement: true            # menu bar app: no Dock icon, no menu bar of its own
+        NSHumanReadableCopyright: "© 2026 JP — Yolo Runner Monitor"
+        CFBundleDisplayName: "Mac Monitor"
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jp1222.macmonitor
+        CODE_SIGN_ENTITLEMENTS: MacMonitor/MacMonitor.entitlements
+        ENABLE_APP_SANDBOX: YES
+        COMBINE_HIDPI_IMAGES: YES
+    dependencies:
+      - target: MacMonitorWidgets
+
+  MacMonitorWidgets:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: MacMonitorWidgets
+      - path: Shared
+    info:
+      path: MacMonitorWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: "Mac Monitor Widgets"
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jp1222.macmonitor.widgets
+        CODE_SIGN_ENTITLEMENTS: MacMonitorWidgets/MacMonitorWidgets.entitlements
+        ENABLE_APP_SANDBOX: YES
+        SKIP_INSTALL: YES
