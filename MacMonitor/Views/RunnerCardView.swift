@@ -116,23 +116,40 @@ public struct RunnerCardView: View {
             }
             .padding(.bottom, 6)
 
-            ProgressBarView(value: job.progress, tone: MMTokens.blue, shimmer: true)
+            // TimelineView re-renders this subtree every second so elapsed
+            // ticks up live + progress bar advances smoothly. SwiftUI's
+            // animation engine on its own would only update on data change,
+            // not wall-clock change — TimelineView bridges that gap.
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let elapsed = job.elapsedSeconds(now: context.date)
+                // Recompute progress/eta against the same historical average
+                // the ViewModel used. If etaSeconds was set on the job by
+                // ViewModel, derive avg = elapsed + eta_at_snapshot_time.
+                let avg = (job.etaSeconds.map { Int($0) + job.elapsedSeconds(now: job.startedAt.addingTimeInterval(Double(elapsed))) })
+                    ?? Int(Double(elapsed) / max(job.progress, 0.01))
+                let livePct = min(0.95, max(0.02, Double(elapsed) / Double(max(avg, 1))))
+                let liveEta = max(0, avg - elapsed)
 
-            HStack(spacing: 4) {
-                Text("\(Int(job.progress * 100))%")
-                    .font(MMFont.rounded(size: 11, weight: .bold))
-                    .foregroundStyle(MMTokens.ink)
-                Text("· \(job.step ?? "")")
-                    .font(MMFont.rounded(size: 11))
-                    .foregroundStyle(MMTokens.inkMuted)
-                Spacer()
-                Text("\(formatElapsed(job.elapsedSeconds()))").mmMono()
-                if let eta = job.etaSeconds {
-                    Text(" · eta ").foregroundStyle(MMTokens.inkFaint).font(MMFont.rounded(size: 11))
-                    Text("~\(eta)s").mmMono()
+                VStack(alignment: .leading, spacing: 5) {
+                    ProgressBarView(value: livePct, tone: MMTokens.blue, shimmer: true)
+
+                    HStack(spacing: 4) {
+                        Text("\(Int(livePct * 100))%")
+                            .font(MMFont.rounded(size: 11, weight: .bold))
+                            .foregroundStyle(MMTokens.ink)
+                        Text("· \(job.step ?? "")")
+                            .font(MMFont.rounded(size: 11))
+                            .foregroundStyle(MMTokens.inkMuted)
+                        Spacer()
+                        Text(formatElapsed(elapsed)).mmMono()
+                        if liveEta > 0 {
+                            Text(" · eta ").foregroundStyle(MMTokens.inkFaint).font(MMFont.rounded(size: 11))
+                            Text("~\(formatElapsed(liveEta))").mmMono()
+                        }
+                    }
                 }
             }
-            .padding(.top, 5)
+            .padding(.top, 1)
         }
     }
 
