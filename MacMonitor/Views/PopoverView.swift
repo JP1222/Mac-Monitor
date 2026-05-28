@@ -15,74 +15,25 @@ public struct PopoverView: View {
     public init() {}
 
     public var body: some View {
-        // Pattern that works inside MenuBarExtra(.window):
-        //   - Outer VStack: PopoverHeader + ScrollView + QuickActionsBar
-        //     (header and footer always visible — don't scroll out of view)
-        //   - ScrollView: middle sections, capped at maxHeight so the popover
-        //     can't grow past one screen
-        //   - Inner VStack: `.fixedSize(vertical:true)` so it reports its
-        //     natural content height — when content < maxHeight the popover
-        //     shrinks to fit; when > maxHeight the inner VStack scrolls.
-        //
-        // The cap height of 560 leaves room on a 13" MacBook screen after
-        // header (50pt) + footer (54pt) + window chrome.
+        // Layout strategy:
+        //   - Header and QuickActionsBar always visible (outside any scroll).
+        //   - Middle sections wrapped in ViewThatFits(.vertical) — SwiftUI
+        //     picks the first variant that fits in available height:
+        //       1. Plain VStack (no scroll) when content < ~560pt
+        //       2. ScrollView fallback when content overflows
+        //     This gives "popover sizes to content when small, scrolls when
+        //     large" without manual height calculation. `.frame(maxHeight:)`
+        //     defines the threshold.
         VStack(spacing: 0) {
             PopoverHeader()
             ErrorBanner()
                 .environmentObject(viewModel)
 
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 0) {
-                    MMSection(title: "Runners") {
-                        VStack(spacing: 8) {
-                            ForEach(viewModel.snapshot.runners) { runner in
-                                RunnerCardView(runner: runner)
-                            }
-                        }
-                    }
-                    MMSection(
-                        title: "Queue · \(viewModel.snapshot.queue.count) waiting",
-                        action: {
-                            if viewModel.snapshot.longestWaitingSeconds > 0 {
-                                Text("longest \(viewModel.snapshot.longestWaitingSeconds)s")
-                                    .font(MMFont.rounded(size: 11, weight: .semibold))
-                                    .foregroundStyle(MMTokens.amber)
-                            } else {
-                                EmptyView()
-                            }
-                        }
-                    ) {
-                        VStack(spacing: 0) {
-                            ForEach(Array(viewModel.snapshot.queue.enumerated()), id: \.element.id) { i, q in
-                                QueueRowView(item: q, isLongest: i == 0 && viewModel.snapshot.queue.count > 0)
-                            }
-                        }
-                    }
-
-                    MMSection(
-                        title: "Recent runs",
-                        action: {
-                            Text("View all on GitHub ›")
-                                .font(MMFont.rounded(size: 11))
-                                .foregroundStyle(MMTokens.inkMuted)
-                        }
-                    ) {
-                        VStack(spacing: 0) {
-                            ForEach(viewModel.snapshot.recent.prefix(5)) { run in
-                                RecentRunRowView(run: run)
-                            }
-                        }
-                    }
-
-                    MMSection(title: "Storage · three-layer", divider: false) {
-                        VStack(spacing: 9) {
-                            ForEach(viewModel.snapshot.primaryDisks) { disk in
-                                DiskMeterView(disk: disk)
-                            }
-                        }
-                    }
+            ViewThatFits(in: .vertical) {
+                sectionsContent          // try un-scrolled first
+                ScrollView(.vertical, showsIndicators: false) {
+                    sectionsContent      // fall back to scroll
                 }
-                .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxHeight: 560)
 
@@ -97,6 +48,63 @@ public struct PopoverView: View {
             RoundedRectangle(cornerRadius: MMTokens.radiusPopover, style: .continuous)
                 .stroke(MMTokens.glassBorder, lineWidth: 1)
         )
+    }
+
+    /// The four data sections. Extracted so ViewThatFits can use the same
+    /// content tree in both the no-scroll and scroll variants without
+    /// duplicating ~60 lines of MMSection definitions.
+    @ViewBuilder
+    private var sectionsContent: some View {
+        VStack(spacing: 0) {
+            MMSection(title: "Runners") {
+                VStack(spacing: 8) {
+                    ForEach(viewModel.snapshot.runners) { runner in
+                        RunnerCardView(runner: runner)
+                    }
+                }
+            }
+            MMSection(
+                title: "Queue · \(viewModel.snapshot.queue.count) waiting",
+                action: {
+                    if viewModel.snapshot.longestWaitingSeconds > 0 {
+                        Text("longest \(viewModel.snapshot.longestWaitingSeconds)s")
+                            .font(MMFont.rounded(size: 11, weight: .semibold))
+                            .foregroundStyle(MMTokens.amber)
+                    } else {
+                        EmptyView()
+                    }
+                }
+            ) {
+                VStack(spacing: 0) {
+                    ForEach(Array(viewModel.snapshot.queue.enumerated()), id: \.element.id) { i, q in
+                        QueueRowView(item: q, isLongest: i == 0 && viewModel.snapshot.queue.count > 0)
+                    }
+                }
+            }
+
+            MMSection(
+                title: "Recent runs",
+                action: {
+                    Text("View all on GitHub ›")
+                        .font(MMFont.rounded(size: 11))
+                        .foregroundStyle(MMTokens.inkMuted)
+                }
+            ) {
+                VStack(spacing: 0) {
+                    ForEach(viewModel.snapshot.recent.prefix(5)) { run in
+                        RecentRunRowView(run: run)
+                    }
+                }
+            }
+
+            MMSection(title: "Storage · three-layer", divider: false) {
+                VStack(spacing: 9) {
+                    ForEach(viewModel.snapshot.primaryDisks) { disk in
+                        DiskMeterView(disk: disk)
+                    }
+                }
+            }
+        }
     }
 
     /// Dark glass = system thin material + our token color overlay. The
