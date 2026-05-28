@@ -15,6 +15,7 @@ import Network
 final class HTTPServer {
 
     private let port: NWEndpoint.Port
+    private let bindHost: NWEndpoint.Host
     private var listener: NWListener?
     // Serial queue for listener + connection events (accept, receive, send).
     private let queue = DispatchQueue(label: "macmonitor.agent.http", qos: .utility)
@@ -22,19 +23,24 @@ final class HTTPServer {
     // `docker` call from stalling the accept loop and other in-flight requests.
     private let workQueue = DispatchQueue(label: "macmonitor.agent.work", qos: .utility, attributes: .concurrent)
 
-    init(port: UInt16) {
+    init(port: UInt16, bindHost: String? = nil) {
         // Non-force-unwrap with an 8765 fallback (main.swift already maps 0 →
         // 8765, so this only guards against an unexpected nil).
         self.port = NWEndpoint.Port(rawValue: port) ?? 8765
+        // Default loopback; an explicit address (e.g. a Tailscale IP) exposes
+        // the agent on that one interface only.
+        self.bindHost = bindHost.map { NWEndpoint.Host($0) } ?? .ipv4(.loopback)
     }
 
     func start() throws {
         let params = NWParameters.tcp
-        // Bind to loopback ONLY. Without requiredLocalEndpoint, NWListener
-        // binds 0.0.0.0 (all interfaces) → anyone on the LAN could reach the
-        // mutating POST endpoints. Pin to 127.0.0.1 so only this machine can
-        // connect.
-        params.requiredLocalEndpoint = NWEndpoint.hostPort(host: .ipv4(.loopback), port: port)
+        // Pin the bind interface. Default is loopback (only this machine) —
+        // without requiredLocalEndpoint NWListener would bind 0.0.0.0 (all
+        // interfaces), exposing the mutating POST endpoints to the whole LAN.
+        // `bindHost` can be set to a specific private address (e.g. a Tailscale
+        // IP) to expose /health to another Mac on that mesh; POST stays
+        // token-gated regardless.
+        params.requiredLocalEndpoint = NWEndpoint.hostPort(host: bindHost, port: port)
         let listener = try NWListener(using: params)
         self.listener = listener
 
@@ -44,7 +50,7 @@ final class HTTPServer {
         listener.stateUpdateHandler = { state in
             switch state {
             case .ready:
-                print("[macmonitor-agent] listening on http://127.0.0.1:\(listener.port?.rawValue ?? 0)")
+                print("[macmonitor-agent] listening on port \(listener.port?.rawValue ?? 0)")
             case .failed(let err):
                 print("[macmonitor-agent] listener failed: \(err)")
             default: break

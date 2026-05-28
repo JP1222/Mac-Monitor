@@ -20,6 +20,7 @@ public struct SettingsView: View {
 
     @State private var tokenInput: String = ""
     @State private var reposText: String = ""
+    @State private var devicesText: String = ""
     @State private var refreshInterval: Int = 15
     @State private var touchIDGate: Bool = false
     @State private var saveStatus: SaveStatus = .idle
@@ -41,6 +42,7 @@ public struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     repoSection
+                    devicesSection
                     refreshSection
                     tokenSection
                     securitySection
@@ -97,6 +99,31 @@ public struct SettingsView: View {
                         .stroke(MMTokens.glassBorder, lineWidth: 1)
                 )
             Text("One `owner/name` per line. Workflow runs, queued jobs and self-hosted runners from each repo are merged into the dashboard.")
+                .font(MMFont.rounded(size: 11))
+                .foregroundStyle(MMTokens.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - Devices (multi-line)
+
+    private var devicesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Devices").mmEyebrow()
+            TextEditor(text: $devicesText)
+                .font(MMFont.mono(size: 13))
+                .scrollContentBackground(.hidden)
+                .padding(6)
+                .frame(minHeight: 50, maxHeight: 90)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(MMTokens.rgba(255, 255, 255, 0.06))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(MMTokens.glassBorder, lineWidth: 1)
+                )
+            Text("One `label@host` per line for the Macs whose disk/CPU you want to see — host can be a hostname or Tailscale IP (e.g. `mac-mini-1@100.89.151.93`). Leave empty to monitor only this Mac. Health is read-only over the agent's open `/health`.")
                 .font(MMFont.rounded(size: 11))
                 .foregroundStyle(MMTokens.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
@@ -256,6 +283,7 @@ public struct SettingsView: View {
 
     private func loadCurrentValues() {
         reposText = UserSettings.repositorySlugs.joined(separator: "\n")
+        devicesText = UserSettings.deviceEndpoints.joined(separator: "\n")
         refreshInterval = UserSettings.refreshIntervalSeconds
         touchIDGate = UserSettings.touchIDGateEnabled
         refreshTokenStatus()
@@ -278,6 +306,12 @@ public struct SettingsView: View {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         UserSettings.repositorySlugs = parsed
+        // Devices ("label@host" per line).
+        let parsedDevices = devicesText
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        UserSettings.deviceEndpoints = parsedDevices
         UserSettings.refreshIntervalSeconds = refreshInterval
         UserSettings.touchIDGateEnabled = touchIDGate
 

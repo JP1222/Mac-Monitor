@@ -197,9 +197,13 @@ public final class DashboardViewModel: ObservableObject {
         let resolvedRepos = repositories.isEmpty
             ? DashboardSnapshot.mock.repositories
             : repositories
-        let devices = snapshot.devices.isEmpty
-            ? DashboardSnapshot.mock.devices
-            : snapshot.devices
+        // Devices the agent is polled on. Configured in Settings as
+        // "label@host" lines (host can be a Tailscale IP for a remote Mac).
+        // Empty → just this Mac via the local agent on 127.0.0.1.
+        let configuredDevices = UserSettings.monitoredDevices
+        let devices = configuredDevices.isEmpty
+            ? [Device(id: "local", label: "This Mac", host: "127.0.0.1")]
+            : configuredDevices
 
         // Capture into local constants so the task-group closures don't have
         // to capture `self`. Both protocols are `Sendable` so the locals can

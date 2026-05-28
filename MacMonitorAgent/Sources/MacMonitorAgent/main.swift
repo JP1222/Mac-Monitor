@@ -19,9 +19,15 @@ import Network
 let parsedPort = UInt16(ProcessInfo.processInfo.environment["MM_AGENT_PORT"] ?? "") ?? 0
 let port: UInt16 = parsedPort == 0 ? 8765 : parsedPort
 
-print("[macmonitor-agent] starting on port \(port)")
+// Bind host: loopback by default (only this machine can reach it). Set
+// MM_AGENT_BIND to a specific interface address — e.g. a Tailscale IP — to
+// expose the agent on that private network so another Mac can read /health.
+let bindHost: String? = (ProcessInfo.processInfo.environment["MM_AGENT_BIND"]?
+    .trimmingCharacters(in: .whitespaces)).flatMap { $0.isEmpty ? nil : $0 }
 
-let server = HTTPServer(port: port)
+print("[macmonitor-agent] starting on \(bindHost ?? "127.0.0.1"):\(port)")
+
+let server = HTTPServer(port: port, bindHost: bindHost)
 do {
     try server.start()
 } catch {

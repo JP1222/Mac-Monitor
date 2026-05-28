@@ -30,6 +30,7 @@ public enum UserSettings {
         static let repositorySlugs       = "macmonitor.repositorySlugs"        // [String]
         static let refreshIntervalSeconds = "macmonitor.refreshIntervalSeconds" // Int
         static let touchIDGateEnabled    = "macmonitor.touchIDGateEnabled"      // Bool
+        static let deviceEndpoints       = "macmonitor.deviceEndpoints"         // [String] "label@host"
     }
 
     private static let ubiquitous = NSUbiquitousKeyValueStore.default
@@ -94,6 +95,51 @@ public enum UserSettings {
             local.set(newValue, forKey: Key.touchIDGateEnabled)
             ubiquitous.synchronize()
             postChange()
+        }
+    }
+
+    // MARK: - deviceEndpoints
+
+    /// Machines the agent is polled on, as `label@host` strings (host may be a
+    /// hostname or IP — e.g. a Tailscale address). Empty → monitor only this
+    /// Mac via the local agent on 127.0.0.1. The agent's `/health` is open
+    /// (no token), so reading a remote device's health needs only reachability.
+    public static var deviceEndpoints: [String] {
+        get {
+            if let arr = ubiquitous.array(forKey: Key.deviceEndpoints) as? [String], !arr.isEmpty {
+                return arr
+            }
+            if let arr = local.stringArray(forKey: Key.deviceEndpoints), !arr.isEmpty {
+                return arr
+            }
+            return []
+        }
+        set {
+            let cleaned = newValue
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            ubiquitous.set(cleaned, forKey: Key.deviceEndpoints)
+            local.set(cleaned, forKey: Key.deviceEndpoints)
+            ubiquitous.synchronize()
+            postChange()
+        }
+    }
+
+    /// Parsed `deviceEndpoints` as `Device`s. `label@host` → that label/host;
+    /// a bare `host` → label == host. Empty list when nothing is configured
+    /// (caller falls back to the local 127.0.0.1 agent).
+    public static var monitoredDevices: [Device] {
+        deviceEndpoints.compactMap { raw in
+            let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !s.isEmpty else { return nil }
+            if let at = s.firstIndex(of: "@") {
+                let label = String(s[..<at]).trimmingCharacters(in: .whitespaces)
+                let host = String(s[s.index(after: at)...]).trimmingCharacters(in: .whitespaces)
+                guard !host.isEmpty else { return nil }
+                let name = label.isEmpty ? host : label
+                return Device(id: name, label: name, host: host)
+            }
+            return Device(id: s, label: s, host: s)
         }
     }
 
