@@ -27,7 +27,7 @@ struct MacMonitorApp: App {
     // Agent client: still mocked until the Mac-mini agent daemon ships.
     @StateObject private var viewModel = DashboardViewModel(
         github: GitHubClient(),
-        agent: MockAgentClient(),
+        agent: AgentClient(),    // real HTTP to local MacMonitorAgent on :8765
         refreshInterval: 15
     )
 

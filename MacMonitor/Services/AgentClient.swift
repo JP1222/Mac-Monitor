@@ -30,31 +30,68 @@ public struct MockAgentClient: AgentClienting {
     public func pruneCache(on device: Device) async throws {}
 }
 
-/// Real HTTP client — points at `http://\(device.host):8080`. Plug in real
-/// decoding when the agent's contract is fixed.
+/// Real HTTP client that talks to MacMonitorAgent (see ../MacMonitorAgent/).
+/// The agent is a standalone Swift executable installed as a LaunchAgent on
+/// each Mac in the build farm. We POST nothing — agent only exposes a GET
+/// `/health` endpoint that returns the current DeviceSnapshot.
+///
+/// Behavior on connection failure: throws `AgentError.unreachable`. Caller
+/// (DashboardViewModel) catches and falls back to the mock so the popover
+/// keeps rendering with last-known data + an error banner.
 public struct AgentClient: AgentClienting {
+
+    public enum AgentError: Swift.Error, LocalizedError {
+        case unreachable(String)
+        case badStatus(Int)
+        case decode
+
+        public var errorDescription: String? {
+            switch self {
+            case .unreachable(let host): return "Agent at \(host) unreachable. Is `macmonitor-agent` running?"
+            case .badStatus(let code):   return "Agent returned HTTP \(code)"
+            case .decode:                return "Agent returned an unexpected payload"
+            }
+        }
+    }
+
     public let session: URLSession
     public let port: Int
 
-    public init(session: URLSession = .shared, port: Int = 8080) {
+    public init(session: URLSession = nil ?? .shared, port: Int = 8765) {
         self.session = session
         self.port = port
     }
 
-    private func endpoint(_ path: String, on device: Device) -> URL? {
-        URL(string: "http://\(device.host):\(port)\(path)")
+    private func endpoint(_ path: String, on device: Device) throws -> URL {
+        guard let url = URL(string: "http://\(device.host):\(port)\(path)") else {
+            throw AgentError.unreachable(device.host)
+        }
+        return url
     }
 
     public func fetchSnapshot(for device: Device) async throws -> DeviceSnapshot {
-        // TODO: real call. For now return the mock so the UI renders.
-        try await MockAgentClient().fetchSnapshot(for: device)
+        let url = try endpoint("/health", on: device)
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 3   // LAN — fail fast if unreachable
+        req.setValue("MacMonitor/0.1", forHTTPHeaderField: "User-Agent")
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch {
+            throw AgentError.unreachable(device.host)
+        }
+        guard let http = response as? HTTPURLResponse else { throw AgentError.decode }
+        guard (200..<300).contains(http.statusCode) else { throw AgentError.badStatus(http.statusCode) }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(DeviceSnapshot.self, from: data)
     }
 
     public func restartRunner(on device: Device) async throws {
-        try await MockAgentClient().restartRunner(on: device)
+        // Out of scope for the agent's read-only MVP. Would POST /actions/restart.
     }
 
     public func pruneCache(on device: Device) async throws {
-        try await MockAgentClient().pruneCache(on: device)
+        // Out of scope for read-only MVP. Would POST /actions/prune-cache.
     }
 }

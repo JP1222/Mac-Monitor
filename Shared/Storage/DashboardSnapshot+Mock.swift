@@ -30,12 +30,15 @@ extension DashboardSnapshot {
             defaultBranch: "main"
         )
 
+        // Default device targets the local machine's MacMonitorAgent.
+        // Change `host` in Settings (future feature) when monitoring a
+        // remote Mac mini in a farm.
         let device = Device(
-            id: "mac-mini-1",
-            label: "mac-mini-1",
-            host: "studio.local",
-            model: "Mac mini (M2 Pro, 2023)",
-            osVersion: "14.5",
+            id: "localhost",
+            label: "this Mac",
+            host: "127.0.0.1",
+            model: nil,
+            osVersion: nil,
             lastSeen: now.addingTimeInterval(-4)
         )
 

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  LaunchAgent that boots MacMonitorAgent on user login and restarts it
+  if it crashes. Install:
+
+    1. swift build -c release           # in MacMonitorAgent/
+    2. cp .build/release/macmonitor-agent /usr/local/bin/
+    3. cp this file to ~/Library/LaunchAgents/
+    4. launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jp1222.macmonitor-agent.plist
+    5. test: curl http://127.0.0.1:8765/health
+
+  Logs end up in /tmp/macmonitor-agent.log + .err.log.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jp1222.macmonitor-agent</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/macmonitor-agent</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MM_AGENT_PORT</key>
+        <string>8765</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/macmonitor-agent.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/macmonitor-agent.err.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
