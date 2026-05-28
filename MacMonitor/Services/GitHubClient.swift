@@ -116,8 +116,38 @@ public struct GitHubClient: GitHubClienting {
             throw Error.http(http.statusCode, snippet)
         }
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { try Self.decodeISO8601Date($0) }
         return try decoder.decode(T.self, from: data)
+    }
+
+    // GitHub Actions usually emits whole-second ISO8601 ("…:30Z") but can
+    // include fractional seconds ("…:30.123Z"). Foundation's `.iso8601`
+    // strategy throws on the fractional form, which would fail the ENTIRE
+    // response from a single such field. Try both formatters.
+    //
+    // `nonisolated(unsafe)`: ISO8601DateFormatter isn't Sendable, but we only
+    // ever call `.date(from:)` (a read-only parse) on these immutable
+    // instances — safe to share across the concurrent decode tasks.
+    nonisolated(unsafe) private static let iso8601Plain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+    nonisolated(unsafe) private static let iso8601Fractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static func decodeISO8601Date(_ decoder: Decoder) throws -> Date {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        if let date = iso8601Plain.date(from: raw) ?? iso8601Fractional.date(from: raw) {
+            return date
+        }
+        throw DecodingError.dataCorruptedError(
+            in: container,
+            debugDescription: "Unparseable ISO8601 date: \(raw)"
+        )
     }
 
     // MARK: - GitHub endpoints
@@ -129,31 +159,49 @@ public struct GitHubClient: GitHubClienting {
     }
 
     public func fetchInProgressJobs(for repository: Repository) async throws -> [WorkflowJob] {
-        // List in-progress runs, then per run pull its jobs (because a run
-        // can contain multiple parallel jobs). For the MVP we only surface
-        // jobs that are themselves "in_progress" — queued/completed ones are
-        // covered by the other endpoints.
-        let runsReq = try endpoint(
-            "/repos/\(repository.slug)/actions/runs",
-            queryItems: [
-                URLQueryItem(name: "status",   value: "in_progress"),
-                URLQueryItem(name: "per_page", value: "20"),
-            ]
-        )
-        let runs = try await decode(APIRunsResponse.self, from: runsReq).workflow_runs
+        // We want every job currently executing ON a runner. Subtlety: a run
+        // stays status=queued until ALL its jobs leave queued, so a parallel
+        // run can be queued at the RUN level while individual JOBS are
+        // in_progress on runners. Querying only status=in_progress runs misses
+        // those — the bug where busy runners showed "Job starting…" forever.
+        // So fetch BOTH in_progress and queued runs, then filter to the jobs
+        // that are themselves in_progress.
+        func runsRequest(status: String) throws -> URLRequest {
+            try endpoint(
+                "/repos/\(repository.slug)/actions/runs",
+                queryItems: [
+                    URLQueryItem(name: "status",   value: status),
+                    URLQueryItem(name: "per_page", value: "20"),
+                ]
+            )
+        }
+        let inProgressReq = try runsRequest(status: "in_progress")
+        let queuedReq = try runsRequest(status: "queued")
+        // Independently resilient: one status query failing must not drop the
+        // other's runs.
+        async let inProgressRuns = try? decode(APIRunsResponse.self, from: inProgressReq)
+        async let queuedRuns = try? decode(APIRunsResponse.self, from: queuedReq)
+        let runs = (await inProgressRuns?.workflow_runs ?? [])
+                 + (await queuedRuns?.workflow_runs ?? [])
 
+        // Per-run job fetch is NON-throwing (matches fetchLastJobsByRunner): one
+        // run's bad /jobs response must not cancel the sibling fetches.
         var jobs: [WorkflowJob] = []
-        try await withThrowingTaskGroup(of: [WorkflowJob].self) { group in
+        await withTaskGroup(of: [WorkflowJob].self) { group in
             for run in runs {
                 group.addTask {
-                    let req = try endpoint("/repos/\(repository.slug)/actions/runs/\(run.id)/jobs")
-                    let payload = try await decode(APIJobsResponse.self, from: req)
-                    return payload.jobs
-                        .filter { $0.status == "in_progress" }
-                        .map { $0.toDomain(run: run, repository: repository) }
+                    do {
+                        let req = try endpoint("/repos/\(repository.slug)/actions/runs/\(run.id)/jobs")
+                        let payload = try await decode(APIJobsResponse.self, from: req)
+                        return payload.jobs
+                            .filter { $0.status == "in_progress" }
+                            .map { $0.toDomain(run: run, repository: repository) }
+                    } catch {
+                        return []
+                    }
                 }
             }
-            for try await batch in group { jobs.append(contentsOf: batch) }
+            for await batch in group { jobs.append(contentsOf: batch) }
         }
         return jobs
     }
@@ -282,8 +330,11 @@ private struct APIRunner: Decodable {
 private struct APIWorkflowRun: Decodable {
     let id: Int
     let name: String?
-    let head_branch: String
-    let head_sha: String
+    // Nullable per GitHub's schema: a tag push, a workflow_run from a fork,
+    // or certain events return null. Decoding into a non-optional String
+    // throws DecodingError.valueNotFound and fails the WHOLE endpoint.
+    let head_branch: String?
+    let head_sha: String?
     let status: String         // "queued" | "in_progress" | "completed"
     let conclusion: String?    // "success" | "failure" | "cancelled" | nil
     let created_at: Date
@@ -302,32 +353,40 @@ private struct APIWorkflowRun: Decodable {
             repository: repository.slug,
             workflow: name ?? display_title ?? "workflow",
             pullRequest: pull_requests?.first?.number,
-            branch: head_branch,
+            branch: head_branch ?? "—",
             enqueuedAt: created_at
         )
     }
 
     func toRecentRun() -> RecentRun {
-        let result: JobResult
-        switch conclusion {
-        case "success":  result = .success
-        case "failure":  result = .failure
-        case "cancelled":result = .cancelled
-        case "skipped":  result = .skipped
-        default:         result = .building
-        }
         let started = run_started_at ?? created_at
         return RecentRun(
-            result: result,
+            result: ghJobResult(status: status, conclusion: conclusion),
             workflow: name ?? display_title ?? "workflow",
             app: nil,
-            branch: head_branch,
-            commitSHA: String(head_sha.prefix(7)),
+            branch: head_branch ?? "—",
+            commitSHA: head_sha.map { String($0.prefix(7)) } ?? "—",
             durationSeconds: max(1, Int(updated_at.timeIntervalSince(started))),
             finishedAt: updated_at,
             failureReason: nil,
             htmlURL: html_url
         )
+    }
+}
+
+/// Map a GitHub run/job `status` + `conclusion` to our `JobResult`. `status`
+/// is authoritative for "still running"; `conclusion` only matters once
+/// completed. A COMPLETED run whose conclusion isn't success/cancelled/skipped
+/// (failure, timed_out, action_required, neutral, stale, startup_failure, or
+/// any future value) is a finished failure — NOT a perpetual spinner, which is
+/// what `switch conclusion { … default: .building }` used to produce.
+private func ghJobResult(status: String, conclusion: String?) -> JobResult {
+    guard status == "completed" else { return .building }
+    switch conclusion {
+    case "success":   return .success
+    case "cancelled": return .cancelled
+    case "skipped":   return .skipped
+    default:          return .failure
     }
 }
 
@@ -345,13 +404,7 @@ private struct APIWorkflowJob: Decodable {
     let runner_name: String?
 
     func toJobResult() -> JobResult {
-        switch conclusion {
-        case "success":  return .success
-        case "failure":  return .failure
-        case "cancelled":return .cancelled
-        case "skipped":  return .skipped
-        default:         return .building
-        }
+        ghJobResult(status: status, conclusion: conclusion)
     }
 
     func toDomain(run: APIWorkflowRun, repository: Repository) -> WorkflowJob {
@@ -363,9 +416,9 @@ private struct APIWorkflowJob: Decodable {
             workflow: run.name ?? run.display_title ?? "workflow",
             app: nil,
             repository: repository.slug,
-            branch: run.head_branch,
+            branch: run.head_branch ?? "—",
             pullRequest: run.pull_requests?.first?.number,
-            commitSHA: String(run.head_sha.prefix(7)),
+            commitSHA: run.head_sha.map { String($0.prefix(7)) } ?? "—",
             step: name,
             progress: 0.5,
             startedAt: started_at ?? Date(),
