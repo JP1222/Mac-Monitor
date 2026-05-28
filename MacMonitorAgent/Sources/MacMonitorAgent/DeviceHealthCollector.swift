@@ -188,7 +188,12 @@ enum DeviceHealthCollector {
     /// Parse Docker's human-readable size strings: "21.26GB", "151.6kB",
     /// "0B", "1.718GB". Docker uses decimal units (1 GB = 1_000_000_000).
     private static func parseDockerSize(_ s: String) -> Int64? {
+        // Longest/largest units FIRST so two-char suffixes match before the
+        // bare "B" branch — otherwise "5.5TB".hasSuffix("B") matches "B",
+        // drops 1 char → Double("5.5T") = nil → the whole row is dropped.
         let units: [(suffix: String, multiplier: Double)] = [
+            ("PB", 1_000_000_000_000_000),
+            ("TB", 1_000_000_000_000),
             ("GB", 1_000_000_000),
             ("MB", 1_000_000),
             ("kB", 1_000),
@@ -245,22 +250,43 @@ enum DeviceHealthCollector {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: path)
         task.arguments = args
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = Pipe()
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        task.standardOutput = outPipe
+        task.standardError = errPipe
         do {
             try task.run()
         } catch {
             return (1, "")
         }
-        // Poll with timeout — if it overruns, send SIGTERM, then wait for
-        // the task to actually die. Reading `terminationStatus` while the
-        // task is still running throws NSInvalidArgumentException.
+        // Drain stdout AND stderr CONCURRENTLY with the watchdog. We discard
+        // stderr, but it MUST still be read: an undrained stderr pipe that
+        // fills past 64KB (e.g. `du` permission-denied spam, or `docker
+        // system df -v` on a big cache) deadlocks the child exactly like an
+        // undrained stdout would. Reading before the wait, on background
+        // threads, avoids that — the reads return when the child closes its
+        // fds (exits or is killed).
+        var outData = Data()
+        let readGroup = DispatchGroup()
+        let ioQueue = DispatchQueue(label: "macmonitor.agent.health.io", attributes: .concurrent)
+        readGroup.enter()
+        ioQueue.async { outData = outPipe.fileHandleForReading.readDataToEndOfFile(); readGroup.leave() }
+        readGroup.enter()
+        ioQueue.async { _ = errPipe.fileHandleForReading.readDataToEndOfFile(); readGroup.leave() }
+
+        // Poll with timeout — if it overruns, SIGTERM, then escalate to
+        // SIGKILL if it ignores that, so the wait below can't block forever.
+        // (Reading `terminationStatus` while still running throws.)
         let deadline = Date().addingTimeInterval(timeout)
         while task.isRunning && Date() < deadline { usleep(20_000) }
-        if task.isRunning { task.terminate() }
+        if task.isRunning {
+            task.terminate()
+            let killBy = Date().addingTimeInterval(2)
+            while task.isRunning && Date() < killBy { usleep(20_000) }
+            if task.isRunning { kill(task.processIdentifier, SIGKILL) }
+        }
         task.waitUntilExit()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return (task.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+        readGroup.wait()
+        return (task.terminationStatus, String(data: outData, encoding: .utf8) ?? "")
     }
 }

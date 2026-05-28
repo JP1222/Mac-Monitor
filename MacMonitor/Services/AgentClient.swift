@@ -105,6 +105,11 @@ public struct AgentClient: AgentClienting {
         req.httpMethod = "POST"
         req.timeoutInterval = 60   // prune can take a while
         req.setValue("MacMonitor/0.1", forHTTPHeaderField: "User-Agent")
+        // Authenticate the mutating request with the shared secret the agent
+        // reads from the App Group container. Without it the agent returns 401.
+        if let token = SnapshotStore.agentToken() {
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         let (_, response) = try await session.data(for: req)
         guard let http = response as? HTTPURLResponse else { throw AgentError.decode }
         guard (200..<300).contains(http.statusCode) else { throw AgentError.badStatus(http.statusCode) }

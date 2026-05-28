@@ -99,14 +99,37 @@ enum AgentActions {
         task.standardError = errPipe
         do { try task.run() } catch { return (1, "", error.localizedDescription) }
 
+        // Drain BOTH pipes CONCURRENTLY with the timeout watchdog. If we waited
+        // for exit before reading, a child writing >64KB to a pipe would block
+        // on the full buffer while we block on exit → deadlock. `docker buildx
+        // prune` prints a "Deleted:" line per layer and easily exceeds 64KB.
+        // readDataToEndOfFile returns when the child closes its fds (exits or
+        // is killed).
+        var outData = Data()
+        var errData = Data()
+        let readGroup = DispatchGroup()
+        let ioQueue = DispatchQueue(label: "macmonitor.agent.actions.io", attributes: .concurrent)
+        readGroup.enter()
+        ioQueue.async { outData = outPipe.fileHandleForReading.readDataToEndOfFile(); readGroup.leave() }
+        readGroup.enter()
+        ioQueue.async { errData = errPipe.fileHandleForReading.readDataToEndOfFile(); readGroup.leave() }
+
+        // Timeout watchdog: SIGTERM at the deadline, escalate to SIGKILL if the
+        // child ignores it, so the wait below can never block forever.
         let deadline = Date().addingTimeInterval(timeout)
         while task.isRunning && Date() < deadline { usleep(20_000) }
-        if task.isRunning { task.terminate() }
+        if task.isRunning {
+            task.terminate()
+            let killBy = Date().addingTimeInterval(2)
+            while task.isRunning && Date() < killBy { usleep(20_000) }
+            if task.isRunning { kill(task.processIdentifier, SIGKILL) }
+        }
         task.waitUntilExit()
+        readGroup.wait()
         return (
             task.terminationStatus,
-            String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "",
-            String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            String(data: outData, encoding: .utf8) ?? "",
+            String(data: errData, encoding: .utf8) ?? ""
         )
     }
 }

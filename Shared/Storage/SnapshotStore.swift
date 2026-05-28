@@ -151,6 +151,40 @@ public enum SnapshotStore {
         )
     }
 
+    /// Shared secret for authenticating mutating requests to the local
+    /// `MacMonitorAgent`. Generated once on first call and persisted (0600)
+    /// in the App Group container at `<container>/agent-token`; the
+    /// (non-sandboxed) agent reads the same file by absolute path and rejects
+    /// POSTs whose `Authorization: Bearer` header doesn't match. Returns nil
+    /// only if the App Group container is unavailable.
+    @discardableResult
+    public static func agentToken() -> String? {
+        guard let container = containerURL else { return nil }
+        let url = container.appendingPathComponent("agent-token")
+        if let data = try? Data(contentsOf: url),
+           let existing = String(data: data, encoding: .utf8)?
+               .trimmingCharacters(in: .whitespacesAndNewlines),
+           !existing.isEmpty {
+            return existing
+        }
+        // First run — 32 random bytes as hex, persisted owner-read/write only.
+        let token = (0..<32)
+            .map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }
+            .joined()
+        do {
+            try Data(token.utf8).write(to: url, options: [.atomic])
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: url.path
+            )
+        } catch {
+            #if DEBUG
+            print("[SnapshotStore] agent-token write failed: \(error)")
+            #endif
+            return nil
+        }
+        return token
+    }
+
     public static var isAppGroupConfigured: Bool {
         containerURL != nil
     }

@@ -16,7 +16,11 @@ final class HTTPServer {
 
     private let port: NWEndpoint.Port
     private var listener: NWListener?
+    // Serial queue for listener + connection events (accept, receive, send).
     private let queue = DispatchQueue(label: "macmonitor.agent.http", qos: .utility)
+    // Concurrent queue for blocking route work (shell-outs). Keeps one slow
+    // `docker` call from stalling the accept loop and other in-flight requests.
+    private let workQueue = DispatchQueue(label: "macmonitor.agent.work", qos: .utility, attributes: .concurrent)
 
     init(port: UInt16) {
         self.port = NWEndpoint.Port(rawValue: port)!
@@ -24,7 +28,12 @@ final class HTTPServer {
 
     func start() throws {
         let params = NWParameters.tcp
-        let listener = try NWListener(using: params, on: port)
+        // Bind to loopback ONLY. Without requiredLocalEndpoint, NWListener
+        // binds 0.0.0.0 (all interfaces) → anyone on the LAN could reach the
+        // mutating POST endpoints. Pin to 127.0.0.1 so only this machine can
+        // connect.
+        params.requiredLocalEndpoint = NWEndpoint.hostPort(host: .ipv4(.loopback), port: port)
+        let listener = try NWListener(using: params)
         self.listener = listener
 
         listener.newConnectionHandler = { [weak self] connection in
@@ -56,7 +65,10 @@ final class HTTPServer {
             // Look for the end of HTTP headers.
             if let end = buffer.range(of: Data("\r\n\r\n".utf8)) {
                 let head = buffer[..<end.lowerBound]
-                self.serve(requestHead: head, on: connection)
+                // Offload route handling (which may block on a shell-out) to
+                // the concurrent work queue so the serial connection queue
+                // stays free to accept + service other requests.
+                self.workQueue.async { self.serve(requestHead: head, on: connection) }
                 return
             }
             if isComplete || error != nil {
@@ -81,7 +93,17 @@ final class HTTPServer {
             return
         }
         let method = String(parts[0])
-        let path = String(parts[1])
+        // Strip any query string ("/health?ts=1" → "/health") before routing.
+        let rawTarget = String(parts[1])
+        let path = rawTarget.split(separator: "?", maxSplits: 1).first.map(String.init) ?? rawTarget
+
+        // Mutating endpoints require a Bearer token matching the shared secret
+        // in the App Group container (written by the app). The loopback bind
+        // already blocks the LAN; the token additionally defeats browser CSRF
+        // to 127.0.0.1 and any other local process without the secret.
+        func mutationAuthorized() -> Bool {
+            AgentToken.validate(Self.bearerToken(in: headString))
+        }
 
         // Routing.
         switch (method, path) {
@@ -100,9 +122,17 @@ final class HTTPServer {
             """
             respond(connection: connection, status: 200, body: Data(body.utf8), contentType: "text/plain")
         case ("POST", "/actions/prune-cache"):
+            guard mutationAuthorized() else {
+                respond(connection: connection, status: 401, body: Data("Unauthorized".utf8), contentType: "text/plain")
+                return
+            }
             let r = AgentActions.pruneCache()
             respondJSON(connection: connection, status: r.ok ? 200 : 500, encoding: r)
         case ("POST", "/actions/restart-runners"):
+            guard mutationAuthorized() else {
+                respond(connection: connection, status: 401, body: Data("Unauthorized".utf8), contentType: "text/plain")
+                return
+            }
             let r = AgentActions.restartRunners()
             respondJSON(connection: connection, status: r.ok ? 200 : 500, encoding: r)
         case (_, _) where method != "GET" && method != "POST":
@@ -110,6 +140,23 @@ final class HTTPServer {
         default:
             respond(connection: connection, status: 404, body: Data("Not Found".utf8), contentType: "text/plain")
         }
+    }
+
+    /// Extract the `Authorization: Bearer <token>` value from the parsed
+    /// request head (request line + headers, blank-line-terminated). Header
+    /// names are case-insensitive per RFC 7230.
+    private static func bearerToken(in headString: String) -> String? {
+        for line in headString.split(separator: "\r\n").dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let name = line[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
+            guard name == "authorization" else { continue }
+            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            if value.lowercased().hasPrefix("bearer ") {
+                return String(value.dropFirst("bearer ".count)).trimmingCharacters(in: .whitespaces)
+            }
+            return nil
+        }
+        return nil
     }
 
     private func respondJSON<T: Encodable>(connection: NWConnection, status: Int, encoding value: T) {
@@ -125,8 +172,10 @@ final class HTTPServer {
             switch status {
             case 200: return "OK"
             case 400: return "Bad Request"
+            case 401: return "Unauthorized"
             case 404: return "Not Found"
             case 405: return "Method Not Allowed"
+            case 500: return "Internal Server Error"
             default:  return "Status"
             }
         }()
