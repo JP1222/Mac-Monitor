@@ -23,7 +23,9 @@ final class HTTPServer {
     private let workQueue = DispatchQueue(label: "macmonitor.agent.work", qos: .utility, attributes: .concurrent)
 
     init(port: UInt16) {
-        self.port = NWEndpoint.Port(rawValue: port)!
+        // Non-force-unwrap with an 8765 fallback (main.swift already maps 0 →
+        // 8765, so this only guards against an unexpected nil).
+        self.port = NWEndpoint.Port(rawValue: port) ?? 8765
     }
 
     func start() throws {
@@ -53,10 +55,18 @@ final class HTTPServer {
 
     private func handle(connection: NWConnection) {
         connection.start(queue: queue)
-        receive(connection: connection, accumulator: Data())
+        // Bound the HEADER-receive phase only (route handling in serve() may
+        // legitimately take longer — e.g. a slow `docker system df`). A
+        // stalled/slow-loris client that never completes its headers gets
+        // dropped at the deadline.
+        receive(connection: connection, accumulator: Data(), deadline: Date().addingTimeInterval(10))
     }
 
-    private func receive(connection: NWConnection, accumulator: Data) {
+    /// Max header block we'll buffer before rejecting — guards against a
+    /// client that streams bytes without ever sending the CRLFCRLF terminator.
+    private static let maxHeaderBytes = 64 * 1024
+
+    private func receive(connection: NWConnection, accumulator: Data, deadline: Date) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, isComplete, error in
             guard let self else { return }
             var buffer = accumulator
@@ -71,12 +81,22 @@ final class HTTPServer {
                 self.workQueue.async { self.serve(requestHead: head, on: connection) }
                 return
             }
+            // Cap the buffer — never grow it without bound.
+            if buffer.count > Self.maxHeaderBytes {
+                self.respond(connection: connection, status: 400, body: Data("Request header too large".utf8), contentType: "text/plain")
+                return
+            }
+            // Drop a connection that hasn't completed its headers in time.
+            if Date() > deadline {
+                connection.cancel()
+                return
+            }
             if isComplete || error != nil {
                 connection.cancel()
                 return
             }
             // Need more bytes — keep reading.
-            self.receive(connection: connection, accumulator: buffer)
+            self.receive(connection: connection, accumulator: buffer, deadline: deadline)
         }
     }
 

@@ -13,7 +13,11 @@
 import Foundation
 import Network
 
-let port: UInt16 = UInt16(ProcessInfo.processInfo.environment["MM_AGENT_PORT"] ?? "8765") ?? 8765
+// Parse MM_AGENT_PORT; treat empty/unparseable/0 as "use the default". Port 0
+// is a valid UInt16 but means "OS-assigned ephemeral" — which would bind a
+// random port and make the agent unreachable at the expected 8765.
+let parsedPort = UInt16(ProcessInfo.processInfo.environment["MM_AGENT_PORT"] ?? "") ?? 0
+let port: UInt16 = parsedPort == 0 ? 8765 : parsedPort
 
 print("[macmonitor-agent] starting on port \(port)")
 

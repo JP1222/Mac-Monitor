@@ -159,7 +159,12 @@ enum DeviceHealthCollector {
     /// "cache pressure" semantics — when cache > 30GB the meter shows
     /// 100% (clamped) and the user gets a clear "time to prune" signal.
     private static func buildKitCacheViaDockerDF() -> DiskUsage? {
-        let result = runShell(dockerBinary, args: ["system", "df"])
+        // 6s (vs the 3s default): under launchd / a busy Docker, `docker
+        // system df` is slow. Too tight a timeout makes this fail → we fall
+        // back to host-side `du` on ~/.docker/buildx, which for Docker Desktop
+        // is just metadata (KB) — wildly under the real cache size. The app's
+        // /health timeout is 12s, comfortably above this.
+        let result = runShell(dockerBinary, args: ["system", "df"], timeout: 6)
         guard result.exitCode == 0 else { return nil }
         // Lines look like:
         //   Build Cache     216       0         21.26GB   21.26GB
@@ -225,10 +230,13 @@ enum DeviceHealthCollector {
         let kb = Int64(result.stdout.split(separator: "\t").first?.trimmingCharacters(in: .whitespaces) ?? "0") ?? 0
         let usedBytes = kb * 1024
         // We don't really know the "total" for an arbitrary folder; use the
-        // volume's total as the denominator.
+        // volume's total as the denominator. If statvfs fails, fall back to the
+        // folder's own size rather than leaving a zeroed struct (which would
+        // make total = 0 and mislabel the folder as 100% of itself).
         var stats = statvfs()
-        statvfs(path, &stats)
-        let total = Int64(stats.f_frsize) * Int64(stats.f_blocks)
+        let total: Int64 = statvfs(path, &stats) == 0
+            ? Int64(stats.f_frsize) * Int64(stats.f_blocks)
+            : usedBytes
         return DiskUsage(layer: layer, label: label, sub: sub, usedBytes: usedBytes, totalBytes: max(usedBytes, total), state: tone(for: usedBytes, total: total))
     }
 
