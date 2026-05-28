@@ -18,6 +18,9 @@
 
 import Foundation
 import Security
+#if canImport(LocalAuthentication)
+import LocalAuthentication
+#endif
 
 public enum KeychainStore {
 
@@ -53,8 +56,61 @@ public enum KeychainStore {
         try set(value: trimmed, service: githubTokenService, account: githubTokenAccount)
     }
 
+    /// Session-level unlock flag. When `UserSettings.touchIDGateEnabled` is
+    /// true and this is false, `readGitHubToken()` returns nil to force the
+    /// caller to `unlockSession()` first. Reset on process restart.
+    private static var sessionUnlocked = false
+
     public static func readGitHubToken() -> String? {
-        try? get(service: githubTokenService, account: githubTokenAccount)
+        // If the Touch ID gate is on and the user hasn't unlocked this
+        // session yet, refuse to surface the token. The caller (typically
+        // GitHubClient) will get nil → its request returns .missingToken →
+        // the user sees a "biometric required" prompt from the ViewModel
+        // and re-tries via unlockSession().
+        if UserSettings.touchIDGateEnabled && !sessionUnlocked {
+            return nil
+        }
+        return try? get(service: githubTokenService, account: githubTokenAccount)
+    }
+
+    /// Triggers the Touch ID prompt (or device password fallback) and on
+    /// success marks the session unlocked so subsequent sync reads succeed.
+    /// Call once on app launch when `UserSettings.touchIDGateEnabled` is
+    /// true, then again any time the user explicitly re-locks.
+    @discardableResult
+    public static func unlockSession(reason: String = "Unlock your GitHub token") async -> Bool {
+        #if canImport(LocalAuthentication)
+        let context = LAContext()
+        var error: NSError?
+        // Use deviceOwnerAuthentication (biometrics OR password) so users
+        // without Touch ID sensors can still unlock.
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
+            // No biometrics and no password configured → user can't unlock.
+            // Fail closed: stay locked, surface the error upstream.
+            return false
+        }
+        do {
+            let success = try await context.evaluatePolicy(
+                .deviceOwnerAuthentication,
+                localizedReason: reason
+            )
+            sessionUnlocked = success
+            return success
+        } catch {
+            return false
+        }
+        #else
+        // No LocalAuthentication framework — unlock unconditionally (we're
+        // already token-gated by the OS keychain).
+        sessionUnlocked = true
+        return true
+        #endif
+    }
+
+    /// Forget the session unlock — next read will require Touch ID again.
+    /// Useful when the user disables the gate then re-enables it.
+    public static func lockSession() {
+        sessionUnlocked = false
     }
 
     public static func deleteGitHubToken() throws {

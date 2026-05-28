@@ -59,12 +59,25 @@ public final class DashboardViewModel: ObservableObject {
     // MARK: - Lifecycle
 
     /// Start the refresh timer. Call from `MacMonitorApp.init()` or on first
-    /// popover open.
+    /// popover open. When the Touch ID gate is enabled, first prompts for
+    /// biometric auth — only proceeds to fetching after the user authorizes.
     public func start() {
-        // Fire once immediately so the UI updates without waiting `refreshInterval`.
-        Task { await refresh() }
-
-        restartTimer()
+        Task { [weak self] in
+            // If gate enabled and not yet unlocked, prompt before fetching.
+            if UserSettings.touchIDGateEnabled {
+                let ok = await KeychainStore.unlockSession(
+                    reason: "Mac Monitor needs to read your GitHub token to fetch build status"
+                )
+                if !ok {
+                    await MainActor.run {
+                        self?.lastError = "Touch ID required. Click the refresh icon to try again."
+                    }
+                    return
+                }
+            }
+            await self?.refresh()
+            await MainActor.run { self?.restartTimer() }
+        }
 
         // Listen for Settings changes — repo list edit / interval picker /
         // iCloud sync from another device. Cheap re-subscribe is fine; debounce
@@ -107,6 +120,9 @@ public final class DashboardViewModel: ObservableObject {
         let composed = await composeSnapshot()
         self.snapshot = composed
         SnapshotStore.write(composed)
+
+        // Notify on new failures (deduped inside the service).
+        await NotificationService.shared.notifyFailures(in: composed)
 
         // Heuristic: if we ended up with zero runners + zero recent runs and
         // we DO have repos configured, something fetch-side is wrong. The
