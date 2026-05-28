@@ -189,11 +189,9 @@ public struct GitHubClient: GitHubClienting {
         // immediate: push commit → CI starts → popover lights up within the
         // next refresh tick, instead of waiting for completion.
         return runs
-            // Drop conditional notify workflows entirely (Discord/Slack/email
-            // notifications, etc.) — they fire on every push but contribute
-            // no useful build signal whether they ran or were skipped.
-            .filter { !($0.name ?? "").lowercased().contains("notify") }
-            // Drop other skipped runs too (path filters, schedule no-ops).
+            // Drop skipped runs (path filters, scheduled no-ops, conditional
+            // workflows that didn't meet their `if:` clause). They contain
+            // no actionable signal but inflate the row count.
             .filter { $0.conclusion != "skipped" }
             .prefix(limit)
             .map { $0.toRecentRun() }
