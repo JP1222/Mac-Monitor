@@ -237,6 +237,12 @@ public struct GitHubClient: GitHubClienting {
         // immediate: push commit → CI starts → popover lights up within the
         // next refresh tick, instead of waiting for completion.
         return runs
+            // GitHub doesn't contractually guarantee newest-first ordering for
+            // list-runs, so sort by created_at desc BEFORE prefixing — taking
+            // prefix(limit) on the raw order could otherwise drop the newest
+            // runs if the first page came back out of order. (The ViewModel
+            // re-sorts by finishedAt later, but only after this prefix.)
+            .sorted { $0.created_at > $1.created_at }
             // Drop skipped runs (path filters, scheduled no-ops, conditional
             // workflows that didn't meet their `if:` clause). They contain
             // no actionable signal but inflate the row count.
