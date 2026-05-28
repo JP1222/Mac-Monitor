@@ -28,6 +28,17 @@ public struct WorkflowJob: Codable, Identifiable, Hashable, Sendable {
     public var progress: Double         // 0...1 (estimated by the agent)
     public var startedAt: Date
     public var etaSeconds: Int?
+    /// Historical average duration (seconds) for this workflow, used to
+    /// drive the live-tick progress bar and ETA countdown in the runner
+    /// card. Set by `DashboardViewModel` from the avg of recent successful
+    /// runs. Nil when no history exists yet — view falls back to a 50%
+    /// flatline + hidden ETA rather than fabricating a number.
+    ///
+    /// Stored here (rather than recomputed in the view from etaSeconds +
+    /// elapsed) because etaSeconds is a snapshot value; the back-derivation
+    /// `avg = etaSeconds + currentElapsed` is wrong by `(currentElapsed -
+    /// snapshotElapsed)`, freezing the displayed ETA at its snapshot value.
+    public var historicalAvgSeconds: Int?
     public var runID: Int
     public var runURL: URL
     /// Self-hosted runner the job is executing on. Optional because
@@ -48,6 +59,7 @@ public struct WorkflowJob: Codable, Identifiable, Hashable, Sendable {
         progress: Double,
         startedAt: Date,
         etaSeconds: Int? = nil,
+        historicalAvgSeconds: Int? = nil,
         runID: Int,
         runURL: URL,
         runnerName: String? = nil
@@ -63,6 +75,7 @@ public struct WorkflowJob: Codable, Identifiable, Hashable, Sendable {
         self.progress = max(0, min(1, progress))
         self.startedAt = startedAt
         self.etaSeconds = etaSeconds
+        self.historicalAvgSeconds = historicalAvgSeconds
         self.runID = runID
         self.runURL = runURL
         self.runnerName = runnerName

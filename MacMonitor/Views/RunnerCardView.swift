@@ -147,19 +147,23 @@ public struct RunnerCardView: View {
             }
             .padding(.bottom, 6)
 
-            // TimelineView re-renders this subtree every second so elapsed
-            // ticks up live + progress bar advances smoothly. SwiftUI's
-            // animation engine on its own would only update on data change,
-            // not wall-clock change — TimelineView bridges that gap.
+            // TimelineView re-renders this subtree every second so elapsed,
+            // progress bar, and ETA all tick smoothly. SwiftUI's animation
+            // engine on its own would only update on data change, not
+            // wall-clock change — TimelineView bridges that gap.
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let elapsed = job.elapsedSeconds(now: context.date)
-                // Recompute progress/eta against the same historical average
-                // the ViewModel used. If etaSeconds was set on the job by
-                // ViewModel, derive avg = elapsed + eta_at_snapshot_time.
-                let avg = (job.etaSeconds.map { Int($0) + job.elapsedSeconds(now: job.startedAt.addingTimeInterval(Double(elapsed))) })
-                    ?? Int(Double(elapsed) / max(job.progress, 0.01))
-                let livePct = min(0.95, max(0.02, Double(elapsed) / Double(max(avg, 1))))
-                let liveEta = max(0, avg - elapsed)
+                // Drive live values off the historical average ViewModel
+                // stored on the job. Without history we don't fabricate a
+                // number — flatline at 50% and hide ETA. New workflows
+                // gain history after a few completed runs.
+                let avg = job.historicalAvgSeconds
+                let livePct: Double = {
+                    guard let avg = avg, avg > 0 else { return 0.5 }
+                    return min(0.95, max(0.02, Double(elapsed) / Double(avg)))
+                }()
+                // Signed: positive = remaining, negative = overrun.
+                let liveEta: Int? = avg.map { $0 - elapsed }
 
                 VStack(alignment: .leading, spacing: 5) {
                     ProgressBarView(value: livePct, tone: MMTokens.blue, shimmer: true)
@@ -173,9 +177,23 @@ public struct RunnerCardView: View {
                             .foregroundStyle(MMTokens.inkMuted)
                         Spacer()
                         Text(formatElapsed(elapsed)).mmMono()
-                        if liveEta > 0 {
-                            Text(" · eta ").foregroundStyle(MMTokens.inkFaint).font(MMFont.rounded(size: 11))
-                            Text("~\(formatElapsed(liveEta))").mmMono()
+                        if let liveEta = liveEta {
+                            if liveEta > 0 {
+                                Text(" · eta ")
+                                    .foregroundStyle(MMTokens.inkFaint)
+                                    .font(MMFont.rounded(size: 11))
+                                Text("~\(formatElapsed(liveEta))").mmMono()
+                            } else {
+                                // Build is running longer than its historical
+                                // average. Amber "over Xs" surfaces overrun
+                                // without dropping the timing info entirely.
+                                Text(" · over ")
+                                    .foregroundStyle(MMTokens.inkFaint)
+                                    .font(MMFont.rounded(size: 11))
+                                Text(formatElapsed(-liveEta))
+                                    .mmMono()
+                                    .foregroundStyle(MMTokens.amber)
+                            }
                         }
                     }
                 }

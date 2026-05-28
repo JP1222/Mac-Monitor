@@ -295,6 +295,12 @@ public final class DashboardViewModel: ObservableObject {
                     let avg = avgDurationByWorkflow[j.workflow]
                     j.progress = j.estimatedProgress(historicalAvgSeconds: avg)
                     j.etaSeconds = j.estimatedEtaSeconds(historicalAvgSeconds: avg)
+                    // Store the avg directly so RunnerCardView can compute
+                    // a live-ticking ETA. Back-deriving avg from etaSeconds
+                    // + elapsed in the view is mathematically wrong (the
+                    // recovery uses currentElapsed instead of snapshot
+                    // elapsed → ETA freezes at the snapshot value).
+                    j.historicalAvgSeconds = avg
                     attached.currentJob = j
                 }
             }
