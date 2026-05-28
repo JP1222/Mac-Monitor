@@ -22,7 +22,7 @@ public struct DiskMeterView: View {
                     .foregroundStyle(MMTokens.inkSoft)
                 Spacer()
                 Text(usedTotalPretty).mmMono()
-                Text("\(Int(disk.usedFraction * 100))%")
+                Text(percentPretty)
                     .font(MMFont.rounded(size: 10.5, weight: .bold))
                     .foregroundStyle(MMTokens.tone(for: disk.displayTone))
                     .frame(width: 34, alignment: .trailing)
@@ -34,12 +34,31 @@ public struct DiskMeterView: View {
         }
     }
 
+    /// Show used in its natural unit (KB/MB/GB) but keep the denominator in
+    /// GB for consistency across rows. Example: "34.3 MB / 30 GB" — makes
+    /// small caches visible instead of rounding to "0.0 / 30 GB".
     private var usedTotalPretty: String {
-        // Display in the unit that fits the JSX prototype (GB).
-        let used = Double(disk.usedBytes) / 1_000_000_000
-        let total = Double(disk.totalBytes) / 1_000_000_000
-        let usedStr = used == used.rounded() ? "\(Int(used))" : String(format: "%.1f", used)
-        let totalStr = total == total.rounded() ? "\(Int(total))" : String(format: "%.1f", total)
-        return "\(usedStr)/\(totalStr) GB"
+        let totalGB = Double(disk.totalBytes) / 1_000_000_000
+        let totalStr = totalGB == totalGB.rounded() ? "\(Int(totalGB))" : String(format: "%.1f", totalGB)
+        return "\(formatBytes(disk.usedBytes)) / \(totalStr) GB"
+    }
+
+    /// "1.2 GB" / "34.3 MB" / "812 KB" / "0 B". Adaptive unit so small
+    /// values don't disappear into rounding noise.
+    private func formatBytes(_ bytes: Int64) -> String {
+        let b = Double(bytes)
+        if b >= 1_000_000_000 { return String(format: "%.1f GB", b / 1_000_000_000) }
+        if b >= 1_000_000     { return String(format: "%.1f MB", b / 1_000_000) }
+        if b >= 1_000         { return String(format: "%.0f KB", b / 1_000) }
+        return "\(bytes) B"
+    }
+
+    /// Round-to-zero protection: if the disk has ANY content but it's less
+    /// than 1% of total, show "<1%" instead of "0%" so users can tell apart
+    /// "literally empty" from "very small". Anything ≥1% rounds normally.
+    private var percentPretty: String {
+        let pct = disk.usedFraction * 100
+        if disk.usedBytes > 0 && pct < 1 { return "<1%" }
+        return "\(Int(pct))%"
     }
 }
