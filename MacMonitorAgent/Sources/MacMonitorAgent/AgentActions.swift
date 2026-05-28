@@ -114,16 +114,14 @@ enum AgentActions {
         readGroup.enter()
         ioQueue.async { errData = errPipe.fileHandleForReading.readDataToEndOfFile(); readGroup.leave() }
 
-        // Timeout watchdog: SIGTERM at the deadline, escalate to SIGKILL if the
-        // child ignores it, so the wait below can never block forever.
+        // Timeout watchdog: SIGTERM at the deadline and let the child wind
+        // down. We don't SIGKILL — force-killing `docker` orphans its children
+        // under launchd. The concurrent pipe draining above (not the kill) is
+        // what prevents the >64KB deadlock for `docker buildx prune`; the
+        // timeout only bounds a hung child, and SIGTERM does that cleanly.
         let deadline = Date().addingTimeInterval(timeout)
         while task.isRunning && Date() < deadline { usleep(20_000) }
-        if task.isRunning {
-            task.terminate()
-            let killBy = Date().addingTimeInterval(2)
-            while task.isRunning && Date() < killBy { usleep(20_000) }
-            if task.isRunning { kill(task.processIdentifier, SIGKILL) }
-        }
+        if task.isRunning { task.terminate() }
         task.waitUntilExit()
         readGroup.wait()
         return (

@@ -259,34 +259,23 @@ enum DeviceHealthCollector {
         } catch {
             return (1, "")
         }
-        // Drain stdout AND stderr CONCURRENTLY with the watchdog. We discard
-        // stderr, but it MUST still be read: an undrained stderr pipe that
-        // fills past 64KB (e.g. `du` permission-denied spam, or `docker
-        // system df -v` on a big cache) deadlocks the child exactly like an
-        // undrained stdout would. Reading before the wait, on background
-        // threads, avoids that — the reads return when the child closes its
-        // fds (exits or is killed).
-        var outData = Data()
-        let readGroup = DispatchGroup()
-        let ioQueue = DispatchQueue(label: "macmonitor.agent.health.io", attributes: .concurrent)
-        readGroup.enter()
-        ioQueue.async { outData = outPipe.fileHandleForReading.readDataToEndOfFile(); readGroup.leave() }
-        readGroup.enter()
-        ioQueue.async { _ = errPipe.fileHandleForReading.readDataToEndOfFile(); readGroup.leave() }
-
-        // Poll with timeout — if it overruns, SIGTERM, then escalate to
-        // SIGKILL if it ignores that, so the wait below can't block forever.
-        // (Reading `terminationStatus` while still running throws.)
+        // Every caller here emits SMALL output — `docker ps -q`, `docker
+        // system df` (~6 lines), `du -sk`, `pgrep` — all far under the 64KB
+        // pipe buffer, so reading after exit can't deadlock (that only happens
+        // when a child fills the buffer and blocks before we read). Poll with a
+        // timeout; on overrun send SIGTERM and let the child wind down.
+        //
+        // We deliberately do NOT SIGKILL: force-killing a slow `docker` under
+        // launchd's minimal environment orphans its child processes, which pile
+        // up and make every subsequent /health call slower (observed: 2.5s →
+        // 11s → 20s). SIGTERM lets docker reap its children cleanly.
         let deadline = Date().addingTimeInterval(timeout)
         while task.isRunning && Date() < deadline { usleep(20_000) }
-        if task.isRunning {
-            task.terminate()
-            let killBy = Date().addingTimeInterval(2)
-            while task.isRunning && Date() < killBy { usleep(20_000) }
-            if task.isRunning { kill(task.processIdentifier, SIGKILL) }
-        }
+        if task.isRunning { task.terminate() }
         task.waitUntilExit()
-        readGroup.wait()
+        // Drain both pipes (discard stderr). Safe post-exit given tiny outputs.
+        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+        _ = errPipe.fileHandleForReading.readDataToEndOfFile()
         return (task.terminationStatus, String(data: outData, encoding: .utf8) ?? "")
     }
 }
