@@ -1,0 +1,128 @@
+# Mac Monitor — AI Development Guide
+
+SwiftUI menu bar app + WidgetKit + Swift daemon. Developed primarily by AI agents (Claude Code). Every claim below is backed by an Apple doc, WWDC session, or community-verified source — links inline.
+
+## Repo layout
+
+| Path | Role |
+| --- | --- |
+| `MacMonitor/` | Main app (MenuBarExtra + Popover) |
+| `MacMonitorWidgets/` | Widget extension (small / medium / large) |
+| `MacMonitorAgent/` | Swift Package, local daemon on `http://127.0.0.1:8765` |
+| `Shared/` | Shared model, design tokens, App Group storage |
+| `project.yml` | XcodeGen source of truth. `MacMonitor.xcodeproj` is generated — gitignored. |
+
+## Before you start coding
+
+1. `git pull --ff-only` — sync with `origin/main` first.
+2. If `project.yml` changed: `xcodegen generate`.
+3. If touching the agent: `cd MacMonitorAgent && swift build -c release`.
+4. Skim recent commits: `git log --oneline -20`.
+
+## Build & run
+
+```bash
+# App build via CLI
+xcodebuild -scheme MacMonitor -configuration Debug build
+
+# Agent release build
+cd MacMonitorAgent && swift build -c release
+
+# (Re)install agent LaunchAgent
+cp launchd/com.jp1222.macmonitor-agent.plist ~/Library/LaunchAgents/
+launchctl bootout gui/$(id -u)/com.jp1222.macmonitor-agent 2>/dev/null || true
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jp1222.macmonitor-agent.plist
+
+# Agent logs
+tail -f /tmp/macmonitor-agent.{out,err}.log
+```
+
+GUI iteration: open `MacMonitor.xcodeproj`, ⌘R the `MacMonitor` scheme.
+
+## SwiftUI / WidgetKit / macOS pitfalls (verified)
+
+### `ScrollView` inside `MenuBarExtra(.window)` shrinks on second open
+- Apply `.fixedSize(horizontal: false, vertical: true)` to the `ScrollView` to pin intrinsic height. ([Apple Forums #741601](https://developer.apple.com/forums/thread/741601))
+- This project uses plain `VStack` + `.prefix(N)` row caps + "+N more" footer instead, because predictable max-height is a feature (popover can't grow unbounded for noisy repos). If you switch back to `ScrollView`, use `fixedSize`.
+
+### Opening Settings / secondary windows from an `LSUIElement` app
+- SwiftUI `Window` / `Settings` scenes **do** work, but the window opens behind other apps — macOS won't foreground a windowed app with no Dock icon. ([steipete.me — 5-hour journey](https://steipete.me/posts/2025/showing-settings-from-macos-menu-bar-items), [FB10184971](https://github.com/feedback-assistant/reports/issues/327))
+- Fix: flip `NSApp.setActivationPolicy(.regular)` → open window → flip back to `.accessory` on close.
+- This project hosts Settings via AppKit `NSWindow` (`SettingsWindowController`) — equivalent solution, predates the flip-pattern writeup.
+
+### App Group state sync is real, but the symptom you'll chase is the wrong one
+- The `cfprefsd` warning when reading `UserDefaults(suiteName:)` from the widget process is **benign** — reads work. ([Apple Forums #659448](https://developer.apple.com/forums/thread/659448))
+- The real issue: `UserDefaults.didChangeNotification` does **not** cross processes. After the app writes, the widget won't know. ([pointfreeco #3459](https://github.com/pointfreeco/swift-composable-architecture/discussions/3459))
+- Fix: every write that affects widget content calls `WidgetCenter.shared.reloadAllTimelines()`.
+- This project also uses a JSON file in the App Group container (`SnapshotStore`) — file IO is simpler than KVO for the snapshot payload.
+
+### `WidgetCenter.reloadAllTimelines()` is rate-limited
+- WidgetKit budgets ~40–70 reloads/day per visible widget; the OS silently throttles excess. ([WWDC21-10048](https://wwdcnotes.com/documentation/wwdcnotes/wwdc21-10048-principles-of-great-widgets/), [Apple — Keeping a widget up to date](https://developer.apple.com/documentation/widgetkit/keeping-a-widget-up-to-date))
+- Debounce to ≥5s minimum. This project uses 5s in `SnapshotStore`.
+
+### Secrets must live in Keychain, NOT App Group containers
+- Shared `UserDefaults` and App Group files are **not encrypted**. Only Keychain access groups encrypt across app + widget + daemon. ([Apple — Sharing keychain items across apps](https://developer.apple.com/documentation/security/sharing-access-to-keychain-items-among-a-collection-of-apps))
+- This project's `KeychainStore` is already correct; don't "simplify" PAT storage to UserDefaults.
+
+### `Process` (NSTask) has two foot-guns
+- `task.terminationStatus` before `task.waitUntilExit()` throws `NSInvalidArgumentException`. ([Apple docs](https://developer.apple.com/documentation/foundation/process/1415801-terminationstatus))
+- If the child writes >~64KB to stdout/stderr, calling `waitUntilExit()` before draining the pipe **deadlocks** — the child blocks on a full pipe, you block on the child. Drain via `pipe.fileHandleForReading.readabilityHandler` on a background queue, or `readDataToEndOfFile` before waiting. ([Swift Forums — frozen Process](https://forums.swift.org/t/the-problem-with-a-frozen-process-in-swift-process-class/39579))
+- See `runShell` in `MacMonitorAgent/Sources/MacMonitorAgent/DeviceHealthCollector.swift`. Anything that shells to `docker system df` or `git log` could hit the pipe limit.
+
+### `withTaskGroup` vs `withThrowingTaskGroup`
+- For "fetch N independent endpoints, tolerate per-endpoint failure": `withTaskGroup` (non-throwing) + `try? await ... ?? defaultValue`.
+- `withThrowingTaskGroup` cancels siblings as soon as a throw propagates out via `try await next()` or iteration. ([SE-0304](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0304-structured-concurrency.md), [HWS](https://www.hackingwithswift.com/quick-start/concurrency/how-to-cancel-a-task-group))
+- This project uses non-throwing groups in `DashboardViewModel.refresh` — one broken endpoint must not blank the whole popover.
+
+### Live-ticking elapsed / progress
+- `TimelineView(.periodic(from: .now, by: 1))` wraps a subtree and rerenders every second — system-managed, power-aware. ([Apple — TimelineSchedule.periodic](https://developer.apple.com/documentation/swiftui/timelineschedule/periodic(from:by:)))
+- SwiftUI's animation engine only ticks on data change; TimelineView bridges to wall clock. Don't use `Timer.publish` for the same job.
+
+### LaunchAgent lifecycle
+- `KeepAlive=true` implicitly sets `RunAtLoad=true`. ([launchd.plist(5)](https://keith.github.io/xcode-man-pages/launchd.plist.5.html))
+- launchd sends `SIGTERM`, then `SIGKILL` after ~5–20s grace. Daemons that don't flush on `SIGTERM` lose state on logout/reboot. Our agent is stateless, so this is a non-issue today — install a signal handler if you add caching.
+
+## GitHub Actions API specifics
+
+### Job → runner stitching
+- `GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs` returns `runner_name` per job (nullable string). ([GitHub REST docs](https://docs.github.com/en/rest/actions/workflow-jobs))
+- Match `WorkflowJob.runner_name == Runner.name` exactly. Don't use `availableJobs.removeFirst()` approximation — it silently misassigns when multiple runners are busy.
+
+### `/runners` and `/runs|/jobs` skew
+- The two endpoints can disagree in the same poll window: `runs/jobs` may show `queued` while `runners` shows the runner as `online & not busy` (or vice versa). ([Community #186811](https://github.com/orgs/community/discussions/186811))
+- Render best-available data with a placeholder when state conflicts. This project's "Building card with no job metadata" placeholder (`RunnerCardView.buildingPlaceholderBody`) handles the case where the runner says "busy" but no job payload has surfaced.
+
+### Rate limit
+- Authenticated calls: 5000 req/hr. Each refresh ≈ 1 call per repo per endpoint. Settings caps the picker at 15s minimum interval for this reason.
+
+## Settings & user state
+
+- GitHub PAT → `KeychainStore`. Touch ID gate optional via `LAContext.deviceOwnerAuthentication`.
+- Repo list / refresh interval / Touch ID toggle → `UserSettings` (iCloud KV with `UserDefaults` fallback — free Apple ID has no iCloud entitlement, falls back silently).
+- Setters post `UserSettings.didChangeNotification`; `DashboardViewModel` listens and triggers immediate refresh. No manual wiring needed.
+
+## Dogfood loop
+
+Mac Monitor watches Yolo-Rollo CI, which runs on this MacBook Pro via self-hosted runners (`macbook-pro-1`, `macbook-pro-2`). To verify a change end-to-end:
+
+1. Push to Yolo-Rollo or `gh workflow run ci.yml -R JP1222/Yolo-Rollo`.
+2. Watch the popover within ~15s.
+3. Verify: building card lights → progress fills → result glyph → recent runs entry appears.
+
+## Commit style
+
+- Imperative subject ≤72 chars: `Runner card: distinct placeholder for BUILDING but no job metadata`.
+- Body explains **why** when fixing a regression — reference the symptom and root cause so the lesson survives in `git log`.
+- One concern per commit. Solo dev project — no Co-Authored-By tags.
+
+## When you're stuck
+
+| Symptom | First check |
+| --- | --- |
+| Build errors after pull | `xcodegen generate` — `project.yml` often drifts ahead of cached `.xcodeproj` state |
+| Widget shows stale data | `~/Library/Group Containers/<team>.com.jp1222.macmonitor/snapshot.json` exists? if not, launch the app once |
+| Widget never updates | App must call `WidgetCenter.shared.reloadAllTimelines()` after writing — `didChangeNotification` doesn't cross processes |
+| Agent unreachable | `curl http://127.0.0.1:8765/health` and `launchctl list \| grep macmonitor-agent` |
+| Settings window opens behind other apps | Need the `setActivationPolicy(.regular)` flip pattern (or AppKit `NSWindow` like this project uses) |
+| `Process` hangs | Child wrote >64KB to a pipe you haven't drained — see Process pitfall above |
+| Popover content blank | PAT missing or lacks scope — needs `Actions: Read + Administration: Read + Metadata: Read` for monitored repos |
