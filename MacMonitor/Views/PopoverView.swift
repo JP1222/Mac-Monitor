@@ -16,27 +16,19 @@ public struct PopoverView: View {
 
     public var body: some View {
         // Layout strategy:
-        //   - Header and QuickActionsBar always visible (outside any scroll).
-        //   - Middle sections wrapped in ViewThatFits(.vertical) — SwiftUI
-        //     picks the first variant that fits in available height:
-        //       1. Plain VStack (no scroll) when content < ~560pt
-        //       2. ScrollView fallback when content overflows
-        //     This gives "popover sizes to content when small, scrolls when
-        //     large" without manual height calculation. `.frame(maxHeight:)`
-        //     defines the threshold.
+        //   - Plain VStack. MenuBarExtra(.window) sizes the popover to the
+        //     view tree's intrinsic height — every section has a known size
+        //     so this Just Works.
+        //   - Sections cap row counts (.prefix(N)) so the popover can't grow
+        //     unbounded if a repo has e.g. 50 queued jobs.
+        //   - Tried ScrollView + .fixedSize and ViewThatFits — both collapse
+        //     to 0 height inside MenuBarExtra. The cap-rows approach is the
+        //     reliable workaround.
         VStack(spacing: 0) {
             PopoverHeader()
             ErrorBanner()
                 .environmentObject(viewModel)
-
-            ViewThatFits(in: .vertical) {
-                sectionsContent          // try un-scrolled first
-                ScrollView(.vertical, showsIndicators: false) {
-                    sectionsContent      // fall back to scroll
-                }
-            }
-            .frame(maxHeight: 560)
-
+            sectionsContent
             QuickActionsBar()
                 .environmentObject(viewModel)
         }
@@ -53,13 +45,23 @@ public struct PopoverView: View {
     /// The four data sections. Extracted so ViewThatFits can use the same
     /// content tree in both the no-scroll and scroll variants without
     /// duplicating ~60 lines of MMSection definitions.
+    /// Visible-row caps per section. Anything beyond these limits is summed
+    /// into a "+N more" footer link so the popover height stays predictable
+    /// (~520pt max with all sections full).
+    private let maxRunners = 6
+    private let maxQueueRows = 5
+    private let maxRecentRows = 5
+
     @ViewBuilder
     private var sectionsContent: some View {
         VStack(spacing: 0) {
-            MMSection(title: "Runners") {
+            MMSection(title: "Runners · \(viewModel.snapshot.runners.count)") {
                 VStack(spacing: 8) {
-                    ForEach(viewModel.snapshot.runners) { runner in
+                    ForEach(viewModel.snapshot.runners.prefix(maxRunners)) { runner in
                         RunnerCardView(runner: runner)
+                    }
+                    if viewModel.snapshot.runners.count > maxRunners {
+                        moreRow(count: viewModel.snapshot.runners.count - maxRunners)
                     }
                 }
             }
@@ -76,8 +78,14 @@ public struct PopoverView: View {
                 }
             ) {
                 VStack(spacing: 0) {
-                    ForEach(Array(viewModel.snapshot.queue.enumerated()), id: \.element.id) { i, q in
+                    ForEach(
+                        Array(viewModel.snapshot.queue.prefix(maxQueueRows).enumerated()),
+                        id: \.element.id
+                    ) { i, q in
                         QueueRowView(item: q, isLongest: i == 0 && viewModel.snapshot.queue.count > 0)
+                    }
+                    if viewModel.snapshot.queue.count > maxQueueRows {
+                        moreRow(count: viewModel.snapshot.queue.count - maxQueueRows)
                     }
                 }
             }
@@ -91,7 +99,7 @@ public struct PopoverView: View {
                 }
             ) {
                 VStack(spacing: 0) {
-                    ForEach(viewModel.snapshot.recent.prefix(5)) { run in
+                    ForEach(viewModel.snapshot.recent.prefix(maxRecentRows)) { run in
                         RecentRunRowView(run: run)
                     }
                 }
@@ -105,6 +113,16 @@ public struct PopoverView: View {
                 }
             }
         }
+    }
+
+    /// "+N more" row at the bottom of a capped section. Visual cue that
+    /// data was truncated without dropping it silently.
+    private func moreRow(count: Int) -> some View {
+        Text("+\(count) more")
+            .font(MMFont.rounded(size: 10.5, weight: .semibold))
+            .foregroundStyle(MMTokens.inkSoft)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 5)
     }
 
     /// Dark glass = system thin material + our token color overlay. The
