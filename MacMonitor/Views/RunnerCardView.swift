@@ -13,27 +13,50 @@ import SwiftUI
 
 public struct RunnerCardView: View {
     public let runner: Runner
+    @State private var isHovering = false
 
     public init(runner: Runner) { self.runner = runner }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            if let job = runner.currentJob, runner.state == .building {
-                buildingBody(job: job)
-                    .padding(.top, 10)
-            } else if let last = runner.lastJob {
-                idleBody(last: last)
-                    .padding(.top, 8)
+        Button(action: openCurrentRun) {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                if let job = runner.currentJob, runner.state == .building {
+                    buildingBody(job: job)
+                        .padding(.top, 10)
+                } else if let last = runner.lastJob {
+                    idleBody(last: last)
+                        .padding(.top, 8)
+                }
             }
+            .padding(12)
+            .background(cardBackground)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(isHovering && hasClickableTarget ? MMTokens.blue.opacity(0.5) : cardBorder, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .padding(12)
-        .background(cardBackground)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(cardBorder, lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .buttonStyle(.plain)
+        .disabled(!hasClickableTarget)
+        .onHover { isHovering = $0 }
+        .help(currentRunURL?.absoluteString ?? "")
+    }
+
+    /// Only the in-progress job's runURL is clickable today. Idle cards don't
+    /// have a single "last run URL" to navigate to (we'd need to also pull
+    /// the run URL into LastJobSummary — follow-up).
+    private var hasClickableTarget: Bool { currentRunURL != nil }
+
+    private var currentRunURL: URL? {
+        runner.state == .building ? runner.currentJob?.runURL : nil
+    }
+
+    private func openCurrentRun() {
+        guard let url = currentRunURL else { return }
+        #if canImport(AppKit)
+        NSWorkspace.shared.open(url)
+        #endif
     }
 
     // MARK: - Header
@@ -210,6 +233,10 @@ public struct RunnerCardView: View {
             : MMTokens.glassBorder
     }
 }
+
+#if canImport(AppKit)
+import AppKit
+#endif
 
 #Preview("Runner cards") {
     VStack(spacing: 12) {

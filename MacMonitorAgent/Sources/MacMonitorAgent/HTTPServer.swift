@@ -76,32 +76,48 @@ final class HTTPServer {
         // First line: "GET /path HTTP/1.1"
         let firstLine = headString.split(separator: "\r\n").first.map(String.init) ?? ""
         let parts = firstLine.split(separator: " ", omittingEmptySubsequences: true)
-        guard parts.count >= 2, parts[0] == "GET" else {
-            respond(connection: connection, status: 405, body: Data("Method Not Allowed".utf8), contentType: "text/plain")
+        guard parts.count >= 2 else {
+            respond(connection: connection, status: 400, body: Data("Bad Request".utf8), contentType: "text/plain")
             return
         }
+        let method = String(parts[0])
         let path = String(parts[1])
 
-        switch path {
-        case "/health":
+        // Routing.
+        switch (method, path) {
+        case ("GET", "/health"):
             let snapshot = DeviceHealthCollector.collect()
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = (try? encoder.encode(snapshot)) ?? Data("{}".utf8)
-            respond(connection: connection, status: 200, body: data, contentType: "application/json")
-        case "/":
+            respondJSON(connection: connection, status: 200, encoding: snapshot)
+        case ("GET", "/"):
             let body = """
             MacMonitorAgent
             ───────────────
-            GET /health   →  Current DeviceSnapshot as JSON
+            GET  /health                  → DeviceSnapshot (JSON)
+            POST /actions/prune-cache     → docker buildx prune -f
+            POST /actions/restart-runners → kickstart all actions.runner.*
 
             Version 0.1
             """
             respond(connection: connection, status: 200, body: Data(body.utf8), contentType: "text/plain")
+        case ("POST", "/actions/prune-cache"):
+            let r = AgentActions.pruneCache()
+            respondJSON(connection: connection, status: r.ok ? 200 : 500, encoding: r)
+        case ("POST", "/actions/restart-runners"):
+            let r = AgentActions.restartRunners()
+            respondJSON(connection: connection, status: r.ok ? 200 : 500, encoding: r)
+        case (_, _) where method != "GET" && method != "POST":
+            respond(connection: connection, status: 405, body: Data("Method Not Allowed".utf8), contentType: "text/plain")
         default:
             respond(connection: connection, status: 404, body: Data("Not Found".utf8), contentType: "text/plain")
         }
+    }
+
+    private func respondJSON<T: Encodable>(connection: NWConnection, status: Int, encoding value: T) {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = (try? encoder.encode(value)) ?? Data("{}".utf8)
+        respond(connection: connection, status: status, body: data, contentType: "application/json")
     }
 
     private func respond(connection: NWConnection, status: Int, body: Data, contentType: String) {

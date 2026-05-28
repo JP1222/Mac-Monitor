@@ -92,10 +92,21 @@ public struct AgentClient: AgentClienting {
     }
 
     public func restartRunner(on device: Device) async throws {
-        // Out of scope for the agent's read-only MVP. Would POST /actions/restart.
+        try await postAction(path: "/actions/restart-runners", on: device)
     }
 
     public func pruneCache(on device: Device) async throws {
-        // Out of scope for read-only MVP. Would POST /actions/prune-cache.
+        try await postAction(path: "/actions/prune-cache", on: device)
+    }
+
+    private func postAction(path: String, on device: Device) async throws {
+        let url = try endpoint(path, on: device)
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 60   // prune can take a while
+        req.setValue("MacMonitor/0.1", forHTTPHeaderField: "User-Agent")
+        let (_, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw AgentError.decode }
+        guard (200..<300).contains(http.statusCode) else { throw AgentError.badStatus(http.statusCode) }
     }
 }
