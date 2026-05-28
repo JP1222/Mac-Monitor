@@ -26,11 +26,16 @@ public struct PopoverView: View {
         //     reliable workaround.
         VStack(spacing: 0) {
             PopoverHeader()
-            ErrorBanner()
-                .environmentObject(viewModel)
-            sectionsContent
-            QuickActionsBar()
-                .environmentObject(viewModel)
+            if viewModel.hasGitHubToken {
+                ErrorBanner()
+                    .environmentObject(viewModel)
+                sectionsContent
+                QuickActionsBar()
+                    .environmentObject(viewModel)
+            } else {
+                OnboardingView()
+                    .environmentObject(viewModel)
+            }
         }
         .frame(width: 380)
         .background(popoverBackground)

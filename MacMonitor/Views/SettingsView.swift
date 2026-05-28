@@ -283,6 +283,9 @@ public struct SettingsView: View {
 
         refreshTokenStatus()
         saveStatus = .saved
+        // Tell ViewModel the token may have changed → drives popover's
+        // onboarding ↔ normal mode switch reactively.
+        viewModel.refreshTokenStatus()
         Task { await viewModel.refresh() }
     }
 

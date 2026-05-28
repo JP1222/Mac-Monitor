@@ -38,6 +38,10 @@ public final class DashboardViewModel: ObservableObject {
     /// the action actually happened.
     @Published public private(set) var lastActionToast: String?
     @Published public private(set) var isPerformingAction = false
+    /// Mirror of `KeychainStore.hasGitHubToken`. Published so the popover
+    /// can switch to OnboardingView reactively when the user removes/adds
+    /// a token from Settings.
+    @Published public private(set) var hasGitHubToken: Bool = false
     private let actionToastDuration: TimeInterval = 4
 
     // MARK: - Dependencies
@@ -62,6 +66,14 @@ public final class DashboardViewModel: ObservableObject {
         self.initialRefreshInterval = refreshInterval
         // Seed from disk so the popover and widgets render instantly on launch.
         self.snapshot = SnapshotStore.readOrMock()
+        self.hasGitHubToken = KeychainStore.hasGitHubToken
+    }
+
+    /// Recompute the published `hasGitHubToken`. Called after the user
+    /// saves/removes a token in Settings so the popover switches
+    /// in/out of onboarding mode without a relaunch.
+    public func refreshTokenStatus() {
+        hasGitHubToken = KeychainStore.hasGitHubToken
     }
 
     // MARK: - Lifecycle
