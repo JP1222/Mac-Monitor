@@ -116,9 +116,28 @@ public enum SnapshotStore {
         }
     }
 
+    /// Debounce window for widget reloads. macOS chronod (the widget host
+    /// daemon) treats too-frequent reloadTimelines calls as suspicious and
+    /// can throttle / drop them. 5s is a comfortable floor that still feels
+    /// responsive to user-driven changes (Settings save, manual refresh).
+    private static let widgetReloadDebounceSeconds: TimeInterval = 5
+    private static var lastWidgetReload: Date = .distantPast
+    private static var pendingWidgetReload: DispatchWorkItem?
+
     private static func reloadWidgets() {
         #if canImport(WidgetKit)
-        WidgetCenter.shared.reloadTimelines(ofKind: widgetKind)
+        // Cancel any pending fire, schedule a fresh one. If snapshots get
+        // written 10 times in 1 second only the LAST schedule actually
+        // hits WidgetCenter.
+        pendingWidgetReload?.cancel()
+        let elapsed = Date().timeIntervalSince(lastWidgetReload)
+        let delay = max(0, widgetReloadDebounceSeconds - elapsed)
+        let work = DispatchWorkItem {
+            WidgetCenter.shared.reloadTimelines(ofKind: widgetKind)
+            lastWidgetReload = Date()
+        }
+        pendingWidgetReload = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
         #endif
     }
 

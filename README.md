@@ -14,14 +14,24 @@ Implemented from the Claude Design handoff package
 - **`MacMonitor`** — the menu bar app target.
   - `MenuBarExtra` with a state-aware glyph (idle / building / warning / failure)
   - Popover dashboard: runners, queue, recent runs, three-layer disk meters
-  - Quick actions: open Actions on GitHub, restart runner, prune cache
+  - Live-ticking progress + ETA on building cards (1Hz `TimelineView`)
+  - Settings window (AppKit-hosted, see below) for repos + interval + Touch ID
+  - macOS notifications when CI transitions to failure (deduped per-run)
+  - Clickable Recent runs → open the run on github.com
+  - Inline error banner when GitHub API can't reach the configured repos
 - **`MacMonitorWidgets`** — WidgetKit extension target.
   - `systemSmall` — at-a-glance progress ring for the active build
   - `systemMedium` — two runner mini-cards + last run strip
   - `systemLarge` — runner cards + queue/passed/failed counts + recent + disk
-  - Reads cached `DashboardSnapshot` from the shared App Group — **never** calls
-    GitHub directly.
-- **`Shared/`** — code compiled into both targets.
+  - Reads cached `DashboardSnapshot` from the App Group's JSON file —
+    **never** calls GitHub directly.
+- **`MacMonitorAgent`** — standalone Swift package (LaunchAgent daemon).
+  - Single binary `macmonitor-agent`, runs on each Mac in the build farm
+  - `GET /health` on port 8765 returns a JSON `DeviceSnapshot` of the local
+    machine's disk / CPU / memory / thermals / OrbStack / Docker state
+  - No external dependencies — `NWListener` HTTP server in one file
+  - `launchd/com.jp1222.macmonitor-agent.plist` for `launchctl bootstrap`
+- **`Shared/`** — code compiled into both Swift targets.
   - `Models/` — `Repository`, `Device`, `Runner`, `WorkflowJob`, `QueueItem`,
     `RecentRun`, `DeviceSnapshot`, `DashboardSnapshot`
   - `Tokens/` — `MMTokens` (1:1 port of `shared.jsx` design tokens),
@@ -29,7 +39,11 @@ Implemented from the Claude Design handoff package
   - `Components/` — `StatusDot`, `ProgressBarView`, `ResultGlyph`,
     `RunnerBrandGlyph`, `RunnerMenuBarGlyph`, `MMSection`
   - `Icons/` — SF Symbols mapping for the `MMIcon` set
-  - `Storage/` — `SnapshotStore` (App Group `UserDefaults`) + mock data
+  - `Storage/` — `SnapshotStore` (App Group JSON file + WidgetCenter
+    debounce), `KeychainStore` (GitHub PAT with optional Touch ID gate),
+    `UserSettings` (repo list + refresh interval + Touch ID toggle,
+    iCloud-synced via `NSUbiquitousKeyValueStore` with local fallback),
+    `DashboardSnapshot+Mock`
 
 ## Setup
 
@@ -70,22 +84,48 @@ Monitor small/medium/large widgets out.
 
 ## Wiring to real data
 
-Right now both data sources are mocks:
+Both data sources are now live by default:
 
-- `MacMonitor/Services/GitHubClient.swift` — `MockGitHubClient` returns the
-  same shape the JSX prototype used. Swap for `GitHubClient` and implement
-  the REST calls when ready.
-- `MacMonitor/Services/AgentClient.swift` — `MockAgentClient`. Real
-  implementation talks to `http://<device.host>:8080/health` on each Mac mini.
+- **GitHub**: `GitHubClient` reads your fine-grained PAT from Keychain and
+  hits `/repos/{owner}/{repo}/actions/{runners,runs,...}` for each repo
+  configured in Settings. Multi-repo supported.
+- **Agent**: `AgentClient` hits `http://<device.host>:8765/health` on each
+  monitored Mac. Build & install per `MacMonitorAgent/README` (or the
+  Package.swift comment).
 
-The agent itself (the launchd daemon that runs on each Mac mini and exposes
-the HTTP endpoint) is a separate project — Phase 1 of the original plan.
+### Setting up the PAT (one-time)
 
-### GitHub PAT
+1. Generate at https://github.com/settings/personal-access-tokens/new
+   - Repository access: only the repos you want to monitor (or "All
+     repositories" if you're lazy)
+   - Permissions: **Actions: Read** + **Administration: Read** +
+     **Metadata: Read** (auto when other repo perms selected)
+   - Expiration: 1 year (GitHub max)
+2. Copy the `github_pat_...` value
+3. In MacMonitor: click the menu bar glyph → gear icon → Settings window
+4. Paste into the **Personal Access Token** SecureField → Save
+5. Token is stored in the macOS Keychain (service `MacMonitor.GitHubToken`,
+   account `github.com`). Survives reinstalls; never written to plain files.
 
-When you fill in the real `GitHubClient`, store the personal access token in
-Keychain under service `MacMonitor.GitHubToken`. The placeholder reads
-`GITHUB_TOKEN` from the environment so you can experiment without Keychain.
+Toggle **Require Touch ID to read token** in Settings to enable biometric
+gating — MacMonitor prompts at launch before fetching, and the token isn't
+released to subprocesses without your fingerprint.
+
+### Installing the agent
+
+```sh
+cd MacMonitorAgent
+swift build -c release
+sudo cp .build/release/macmonitor-agent /usr/local/bin/
+mkdir -p ~/Library/LaunchAgents
+cp launchd/com.jp1222.macmonitor-agent.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jp1222.macmonitor-agent.plist
+curl http://127.0.0.1:8765/health   # verify
+```
+
+To monitor multiple Macs, repeat on each one and add their hostnames as
+`Device` entries (UI for this is forthcoming; for now edit
+`DashboardSnapshot+Mock.swift`'s default devices array).
 
 ## Architecture
 
