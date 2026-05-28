@@ -78,6 +78,11 @@ GUI iteration: open `MacMonitor.xcodeproj`, ⌘R the `MacMonitor` scheme.
 - `TimelineView(.periodic(from: .now, by: 1))` wraps a subtree and rerenders every second — system-managed, power-aware. ([Apple — TimelineSchedule.periodic](https://developer.apple.com/documentation/swiftui/timelineschedule/periodic(from:by:)))
 - SwiftUI's animation engine only ticks on data change; TimelineView bridges to wall clock. Don't use `Timer.publish` for the same job.
 
+### Snapshot values are not live values — store the constant on the model
+- If the ViewModel computes a snapshot derivative (e.g. `etaSeconds = avg − elapsed_at_snapshot`), **do NOT** try to recover the original constant in the view as `derivative + elapsed_now`. The view sees `elapsed_now`, not `elapsed_at_snapshot` — the "recovered" constant drifts every second by `(elapsed_now − elapsed_snapshot)`, which pins the live value to its snapshot. The TimelineView reruns every second but the displayed number never changes.
+- **Rule**: store the source-of-truth constant on the model so live = `constant − elapsed_now` cleanly. See `WorkflowJob.historicalAvgSeconds` and the comment on that property.
+- This bit ETA in `RunnerCardView`: appeared to tick but was mathematically frozen at the snapshot value, and disappeared entirely once snapshot eta hit 0 (build over historical avg).
+
 ### LaunchAgent lifecycle
 - `KeepAlive=true` implicitly sets `RunAtLoad=true`. ([launchd.plist(5)](https://keith.github.io/xcode-man-pages/launchd.plist.5.html))
 - launchd sends `SIGTERM`, then `SIGKILL` after ~5–20s grace. Daemons that don't flush on `SIGTERM` lose state on logout/reboot. Our agent is stateless, so this is a non-issue today — install a signal handler if you add caching.
