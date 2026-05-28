@@ -131,6 +131,12 @@ public final class DashboardViewModel: ObservableObject {
     // MARK: - Refresh pipeline
 
     public func refresh() async {
+        // Re-entrancy guard: skip if a refresh is already in flight. Without
+        // it, a cycle slower than the timer interval (slow agent / many repos)
+        // overlaps the next tick; a late-finishing OLDER refresh could then
+        // overwrite a newer snapshot with stale data. isRefreshing is set
+        // synchronously before the first await, so the second entrant sees it.
+        guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
 
@@ -139,16 +145,23 @@ public final class DashboardViewModel: ObservableObject {
         // every API call 401s. Surface a user-facing message in that case.
         let composed = await composeSnapshot()
         self.snapshot = composed
-        SnapshotStore.write(composed)
+
+        // Degraded = repos configured but zero runners AND zero recent runs —
+        // almost always a missing/expired PAT or a transient outage. Update
+        // the in-memory snapshot (so the open popover shows the empty state +
+        // banner) but DON'T persist it: overwriting the App Group file with an
+        // empty snapshot would blank the widget, discarding the last-good data
+        // it was happily showing.
+        let degraded = composed.runners.isEmpty && composed.recent.isEmpty
+            && !composed.repositories.isEmpty
+        if !degraded {
+            SnapshotStore.write(composed)
+        }
 
         // Notify on new failures (deduped inside the service).
         await NotificationService.shared.notifyFailures(in: composed)
 
-        // Heuristic: if we ended up with zero runners + zero recent runs and
-        // we DO have repos configured, something fetch-side is wrong. The
-        // most common culprit is missing/expired PAT or scope mismatch.
-        if composed.runners.isEmpty && composed.recent.isEmpty
-            && !composed.repositories.isEmpty {
+        if degraded {
             if KeychainStore.readGitHubToken() == nil {
                 self.lastError = "No GitHub token in Keychain. Open Settings to add one."
             } else {
@@ -266,43 +279,36 @@ public final class DashboardViewModel: ObservableObject {
             avgDurationByWorkflow[workflow] = sample.map { $0.durationSeconds }.reduce(0, +) / sample.count
         }
 
-        // Index in-progress jobs by runner_name for precise matching. Falls
-        // back to a queue of unassigned jobs (jobs whose runner_name isn't
-        // in our known runner list, OR jobs without runner_name at all) so
-        // the second busy runner without a matching job still gets SOMETHING
-        // to display.
+        // Index in-progress jobs by runner_name for EXACT matching only. We do
+        // NOT keep an "unassigned" fallback queue: GitHub puts runner_name on
+        // every self-hosted job, so no match means we genuinely don't know
+        // which runner runs it. Guessing (the old removeFirst) attaches the
+        // wrong — possibly cross-repo — job to a card: wrong workflow/branch/PR
+        // and the wrong run URL on click. An unmatched building runner keeps
+        // its "Job starting…" placeholder instead.
         var jobsByRunner: [String: WorkflowJob] = [:]
-        var unassigned: [WorkflowJob] = []
         for job in availableJobs {
             if let name = job.runnerName, !name.isEmpty {
                 jobsByRunner[name] = job
-            } else {
-                unassigned.append(job)
             }
         }
 
         let runners = runnersFromAPI.map { runner -> Runner in
             var attached = runner
-            // Building? Attach the matching in-progress job — first by exact
-            // runner_name (the truth from GitHub), fall back to the
-            // unassigned queue if no name match.
-            if runner.state == .building {
-                var job: WorkflowJob? = jobsByRunner[runner.name]
-                if job == nil, !unassigned.isEmpty {
-                    job = unassigned.removeFirst()
-                }
-                if var j = job {
-                    let avg = avgDurationByWorkflow[j.workflow]
-                    j.progress = j.estimatedProgress(historicalAvgSeconds: avg)
-                    j.etaSeconds = j.estimatedEtaSeconds(historicalAvgSeconds: avg)
-                    // Store the avg directly so RunnerCardView can compute
-                    // a live-ticking ETA. Back-deriving avg from etaSeconds
-                    // + elapsed in the view is mathematically wrong (the
-                    // recovery uses currentElapsed instead of snapshot
-                    // elapsed → ETA freezes at the snapshot value).
-                    j.historicalAvgSeconds = avg
-                    attached.currentJob = j
-                }
+            // Building? Attach the in-progress job that GitHub says runs on
+            // THIS runner (exact runner_name match). No match → leave
+            // currentJob nil so the card shows the "Job starting…" placeholder
+            // rather than a guessed/foreign job.
+            if runner.state == .building, var j = jobsByRunner[runner.name] {
+                let avg = avgDurationByWorkflow[j.workflow]
+                j.progress = j.estimatedProgress(historicalAvgSeconds: avg)
+                j.etaSeconds = j.estimatedEtaSeconds(historicalAvgSeconds: avg)
+                // Store the avg directly so RunnerCardView can compute a
+                // live-ticking ETA. Back-deriving avg from etaSeconds + elapsed
+                // in the view is mathematically wrong (it uses currentElapsed
+                // instead of snapshot elapsed → ETA freezes at the snapshot).
+                j.historicalAvgSeconds = avg
+                attached.currentJob = j
             }
             // Always try to attach lastJob if we have one for this runner —
             // makes idle/offline cards informative instead of empty.

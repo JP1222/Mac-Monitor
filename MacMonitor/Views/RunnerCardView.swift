@@ -157,13 +157,16 @@ public struct RunnerCardView: View {
                 // stored on the job. Without history we don't fabricate a
                 // number — flatline at 50% and hide ETA. New workflows
                 // gain history after a few completed runs.
-                let avg = job.historicalAvgSeconds
+                // Treat a zero/absent historical average as "no data": flatline
+                // the bar at 50% and hide ETA rather than fabricate one (a
+                // non-nil avg of 0 would otherwise show "over Xs" from t=0).
+                let validAvg: Int? = (job.historicalAvgSeconds ?? 0) > 0 ? job.historicalAvgSeconds : nil
                 let livePct: Double = {
-                    guard let avg = avg, avg > 0 else { return 0.5 }
-                    return min(0.95, max(0.02, Double(elapsed) / Double(avg)))
+                    guard let validAvg else { return 0.5 }
+                    return min(0.95, max(0.02, Double(elapsed) / Double(validAvg)))
                 }()
-                // Signed: positive = remaining, negative = overrun.
-                let liveEta: Int? = avg.map { $0 - elapsed }
+                // Signed: >= 0 remaining, < 0 overrun.
+                let liveEta: Int? = validAvg.map { $0 - elapsed }
 
                 VStack(alignment: .leading, spacing: 5) {
                     ProgressBarView(value: livePct, tone: MMTokens.blue, shimmer: true)
@@ -178,7 +181,9 @@ public struct RunnerCardView: View {
                         Spacer()
                         Text(formatElapsed(elapsed)).mmMono()
                         if let liveEta = liveEta {
-                            if liveEta > 0 {
+                            if liveEta >= 0 {
+                                // 0 → "~0m 00s" (about to finish), never the
+                                // contradictory "over 0m 00s" at the crossover.
                                 Text(" · eta ")
                                     .foregroundStyle(MMTokens.inkFaint)
                                     .font(MMFont.rounded(size: 11))

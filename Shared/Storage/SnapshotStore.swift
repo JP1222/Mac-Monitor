@@ -126,18 +126,25 @@ public enum SnapshotStore {
 
     private static func reloadWidgets() {
         #if canImport(WidgetKit)
-        // Cancel any pending fire, schedule a fresh one. If snapshots get
-        // written 10 times in 1 second only the LAST schedule actually
-        // hits WidgetCenter.
-        pendingWidgetReload?.cancel()
-        let elapsed = Date().timeIntervalSince(lastWidgetReload)
-        let delay = max(0, widgetReloadDebounceSeconds - elapsed)
-        let work = DispatchWorkItem {
-            WidgetCenter.shared.reloadTimelines(ofKind: widgetKind)
-            lastWidgetReload = Date()
+        // write() is "safe to call from any thread", but lastWidgetReload /
+        // pendingWidgetReload are unsynchronized statics. Hop to main so every
+        // read/write of them (and the WidgetCenter call + the debounce work
+        // item, which also runs on main) is serialized on one queue regardless
+        // of the caller's thread — no torn reads, no leaked/uncancelled items.
+        DispatchQueue.main.async {
+            // Cancel any pending fire, schedule a fresh one. If snapshots get
+            // written 10 times in 1 second only the LAST schedule actually
+            // hits WidgetCenter.
+            pendingWidgetReload?.cancel()
+            let elapsed = Date().timeIntervalSince(lastWidgetReload)
+            let delay = max(0, widgetReloadDebounceSeconds - elapsed)
+            let work = DispatchWorkItem {
+                WidgetCenter.shared.reloadTimelines(ofKind: widgetKind)
+                lastWidgetReload = Date()
+            }
+            pendingWidgetReload = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
         }
-        pendingWidgetReload = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
         #endif
     }
 
