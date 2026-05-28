@@ -43,15 +43,27 @@ public struct AgentClient: AgentClienting {
     public enum AgentError: Swift.Error, LocalizedError {
         case unreachable(String)
         case badStatus(Int)
+        /// Carries the agent's own failure message from the JSON body — e.g.
+        /// "No actions.runner.* LaunchAgents found…" — so the user sees WHY,
+        /// not a bare status code.
+        case actionFailed(String)
         case decode
 
         public var errorDescription: String? {
             switch self {
             case .unreachable(let host): return "Agent at \(host) unreachable. Is `macmonitor-agent` running?"
             case .badStatus(let code):   return "Agent returned HTTP \(code)"
+            case .actionFailed(let msg): return msg
             case .decode:                return "Agent returned an unexpected payload"
             }
         }
+    }
+
+    /// The agent's action response body (`{ ok, message, affected }`). We only
+    /// need the message for surfacing failures.
+    private struct ActionResult: Decodable {
+        let ok: Bool
+        let message: String?
     }
 
     public let session: URLSession
@@ -111,8 +123,22 @@ public struct AgentClient: AgentClienting {
         if let token = SnapshotStore.agentToken() {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        let (_, response) = try await session.data(for: req)
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch {
+            throw AgentError.unreachable(device.host)
+        }
         guard let http = response as? HTTPURLResponse else { throw AgentError.decode }
-        guard (200..<300).contains(http.statusCode) else { throw AgentError.badStatus(http.statusCode) }
+        guard (200..<300).contains(http.statusCode) else {
+            // Prefer the agent's own explanation (e.g. "No actions.runner.*
+            // LaunchAgents found. Install with actions-runner/svc.sh install.")
+            // over a bare "HTTP 500".
+            if let result = try? JSONDecoder().decode(ActionResult.self, from: data),
+               let message = result.message, !message.isEmpty {
+                throw AgentError.actionFailed(message)
+            }
+            throw AgentError.badStatus(http.statusCode)
+        }
     }
 }
