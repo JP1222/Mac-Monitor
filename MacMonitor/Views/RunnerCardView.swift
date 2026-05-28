@@ -24,6 +24,14 @@ public struct RunnerCardView: View {
                 if let job = runner.currentJob, runner.state == .building {
                     buildingBody(job: job)
                         .padding(.top, 10)
+                } else if runner.state == .building {
+                    // BUILDING but GitHub hasn't surfaced the job metadata
+                    // yet (race window between /runners reporting busy=true
+                    // and the new workflow_run/jobs appearing). Show a
+                    // placeholder so users don't see contradictory state
+                    // ("Building" chip + "Last job" idle text).
+                    buildingPlaceholderBody
+                        .padding(.top, 10)
                 } else if let last = runner.lastJob {
                     idleBody(last: last)
                         .padding(.top, 8)
@@ -178,6 +186,26 @@ public struct RunnerCardView: View {
 
     private func formatElapsed(_ seconds: Int) -> String {
         "\(seconds / 60)m \(String(format: "%02d", seconds % 60))s"
+    }
+
+    // MARK: - Building placeholder (BUILDING chip but no job metadata yet)
+
+    private var buildingPlaceholderBody: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+                .scaleEffect(0.7)
+                .tint(MMTokens.blue)
+            Text("Job starting…")
+                .font(MMFont.rounded(size: 11.5))
+                .foregroundStyle(MMTokens.inkMuted)
+            Spacer()
+            if let last = runner.lastJob {
+                Text("last · \(formatElapsed(last.durationSeconds))")
+                    .font(MMFont.mono(size: 10.5))
+                    .foregroundStyle(MMTokens.inkSoft)
+            }
+        }
     }
 
     // MARK: - Idle body
