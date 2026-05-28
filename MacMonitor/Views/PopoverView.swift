@@ -54,14 +54,23 @@ public struct PopoverView: View {
 
     @ViewBuilder
     private var sectionsContent: some View {
+        let onlineRunners = viewModel.snapshot.runners.filter { $0.status == .online }
+        let offlineRunners = viewModel.snapshot.runners.filter { $0.status == .offline }
+
         VStack(spacing: 0) {
             MMSection(title: "Runners · \(viewModel.snapshot.runners.count)") {
                 VStack(spacing: 8) {
-                    ForEach(viewModel.snapshot.runners.prefix(maxRunners)) { runner in
+                    ForEach(onlineRunners.prefix(maxRunners)) { runner in
                         RunnerCardView(runner: runner)
                     }
-                    if viewModel.snapshot.runners.count > maxRunners {
-                        moreRow(count: viewModel.snapshot.runners.count - maxRunners)
+                    if onlineRunners.count > maxRunners {
+                        moreRow(count: onlineRunners.count - maxRunners)
+                    }
+                    // Offline runners collapsed into a single chip so they
+                    // don't eat 80pt of vertical space per runner just to
+                    // say "still off". Names still visible.
+                    if !offlineRunners.isEmpty {
+                        offlineSummaryChip(offlineRunners)
                     }
                 }
             }
@@ -123,6 +132,33 @@ public struct PopoverView: View {
             .foregroundStyle(MMTokens.inkSoft)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.vertical, 5)
+    }
+
+    /// Compact one-line chip listing offline runners. Replaces per-runner
+    /// full cards for offline status — keeps the names visible but reclaims
+    /// ~60pt per runner of vertical space.
+    private func offlineSummaryChip(_ runners: [Runner]) -> some View {
+        HStack(spacing: 8) {
+            StatusDot(state: .offline, pulse: false, size: 7)
+            Text("\(runners.count) offline")
+                .font(MMFont.rounded(size: 11.5, weight: .semibold))
+                .foregroundStyle(MMTokens.inkSoft)
+            Text("·").foregroundStyle(MMTokens.inkFaint)
+            Text(runners.map(\.label).joined(separator: ", "))
+                .font(MMFont.mono(size: 10.5))
+                .foregroundStyle(MMTokens.inkFaint)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(MMTokens.rgba(255, 255, 255, 0.03))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(MMTokens.glassBorder, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     /// Dark glass = system thin material + our token color overlay. The
