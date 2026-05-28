@@ -356,8 +356,8 @@ private struct APIWorkflowJob: Decodable {
 
     func toDomain(run: APIWorkflowRun, repository: Repository) -> WorkflowJob {
         // GitHub doesn't report a real "% complete" — we report 0.5 as a
-        // conservative placeholder. A future iteration can estimate progress
-        // from historical run durations.
+        // conservative placeholder. ViewModel re-derives a real % from
+        // historical avg duration if available.
         WorkflowJob(
             id: String(id),
             workflow: run.name ?? run.display_title ?? "workflow",
@@ -371,7 +371,8 @@ private struct APIWorkflowJob: Decodable {
             startedAt: started_at ?? Date(),
             etaSeconds: nil,
             runID: run.id,
-            runURL: html_url
+            runURL: html_url,
+            runnerName: runner_name
         )
     }
 }

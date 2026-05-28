@@ -30,6 +30,11 @@ public struct WorkflowJob: Codable, Identifiable, Hashable, Sendable {
     public var etaSeconds: Int?
     public var runID: Int
     public var runURL: URL
+    /// Self-hosted runner the job is executing on. Optional because
+    /// cloud-runner jobs leave it nil and so does the queued-state.
+    /// Used by DashboardViewModel to stitch the job to its Runner card
+    /// by name match.
+    public var runnerName: String?
 
     public init(
         id: String,
@@ -44,7 +49,8 @@ public struct WorkflowJob: Codable, Identifiable, Hashable, Sendable {
         startedAt: Date,
         etaSeconds: Int? = nil,
         runID: Int,
-        runURL: URL
+        runURL: URL,
+        runnerName: String? = nil
     ) {
         self.id = id
         self.workflow = workflow
@@ -59,6 +65,7 @@ public struct WorkflowJob: Codable, Identifiable, Hashable, Sendable {
         self.etaSeconds = etaSeconds
         self.runID = runID
         self.runURL = runURL
+        self.runnerName = runnerName
     }
 
     public func elapsedSeconds(now: Date = Date()) -> Int {

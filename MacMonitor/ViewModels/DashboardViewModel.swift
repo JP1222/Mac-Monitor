@@ -233,7 +233,7 @@ public final class DashboardViewModel: ObservableObject {
                 }
             }
         }
-        var availableJobs = await inProgressJobsTask
+        let availableJobs = await inProgressJobsTask
         let lastJobsByRunner = await lastJobsTask
 
         // Build per-workflow historical average durations from the recent
@@ -246,16 +246,37 @@ public final class DashboardViewModel: ObservableObject {
             avgDurationByWorkflow[workflow] = sample.map { $0.durationSeconds }.reduce(0, +) / sample.count
         }
 
+        // Index in-progress jobs by runner_name for precise matching. Falls
+        // back to a queue of unassigned jobs (jobs whose runner_name isn't
+        // in our known runner list, OR jobs without runner_name at all) so
+        // the second busy runner without a matching job still gets SOMETHING
+        // to display.
+        var jobsByRunner: [String: WorkflowJob] = [:]
+        var unassigned: [WorkflowJob] = []
+        for job in availableJobs {
+            if let name = job.runnerName, !name.isEmpty {
+                jobsByRunner[name] = job
+            } else {
+                unassigned.append(job)
+            }
+        }
+
         let runners = runnersFromAPI.map { runner -> Runner in
             var attached = runner
-            // Building? Attach an in-progress job + recompute its progress
-            // and ETA from historical averages of the same workflow.
-            if runner.state == .building, !availableJobs.isEmpty {
-                var job = availableJobs.removeFirst()
-                let avg = avgDurationByWorkflow[job.workflow]
-                job.progress = job.estimatedProgress(historicalAvgSeconds: avg)
-                job.etaSeconds = job.estimatedEtaSeconds(historicalAvgSeconds: avg)
-                attached.currentJob = job
+            // Building? Attach the matching in-progress job — first by exact
+            // runner_name (the truth from GitHub), fall back to the
+            // unassigned queue if no name match.
+            if runner.state == .building {
+                var job: WorkflowJob? = jobsByRunner[runner.name]
+                if job == nil, !unassigned.isEmpty {
+                    job = unassigned.removeFirst()
+                }
+                if var j = job {
+                    let avg = avgDurationByWorkflow[j.workflow]
+                    j.progress = j.estimatedProgress(historicalAvgSeconds: avg)
+                    j.etaSeconds = j.estimatedEtaSeconds(historicalAvgSeconds: avg)
+                    attached.currentJob = j
+                }
             }
             // Always try to attach lastJob if we have one for this runner —
             // makes idle/offline cards informative instead of empty.
