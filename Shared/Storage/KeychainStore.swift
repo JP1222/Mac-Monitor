@@ -117,8 +117,14 @@ public enum KeychainStore {
         try delete(service: githubTokenService, account: githubTokenAccount)
     }
 
+    /// Presence check — does a token exist in the keychain? Uses an
+    /// existence-only query (NOT `readGitHubToken()`), so it stays correct
+    /// when the Touch ID gate is engaged: the gate guards *reading the
+    /// secret*, but mere existence isn't sensitive. Routing through
+    /// `readGitHubToken()` made this falsely report "no token" on a locked
+    /// session → the popover showed onboarding for Touch-ID users.
     public static var hasGitHubToken: Bool {
-        readGitHubToken()?.isEmpty == false
+        itemExists(service: githubTokenService, account: githubTokenAccount)
     }
 
     // MARK: - Generic CRUD
@@ -173,6 +179,20 @@ public enum KeychainStore {
             throw KeychainError.decodeFailure
         }
         return string
+    }
+
+    /// Existence test that never returns the secret value — so it doesn't
+    /// trip the Touch ID gate or any keychain ACL. `kSecReturnData: false`
+    /// + nil result means SecItemCopyMatching just reports match/no-match.
+    private static func itemExists(service: String, account: String) -> Bool {
+        let query: [String: Any] = [
+            kSecClass as String:        kSecClassGenericPassword,
+            kSecAttrService as String:  service,
+            kSecAttrAccount as String:  account,
+            kSecMatchLimit as String:   kSecMatchLimitOne,
+            kSecReturnData as String:   false,
+        ]
+        return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
     }
 
     private static func delete(service: String, account: String) throws {

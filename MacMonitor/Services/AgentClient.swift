@@ -72,11 +72,12 @@ public struct AgentClient: AgentClienting {
     public func fetchSnapshot(for device: Device) async throws -> DeviceSnapshot {
         let url = try endpoint("/health", on: device)
         var req = URLRequest(url: url)
-        // 8s timeout — agent shells out to `docker system df` which can
-        // take 4-5s on a busy Docker Desktop instance. Too tight a
-        // timeout makes the dashboard's Storage section silently empty
-        // every refresh.
-        req.timeoutInterval = 8
+        // 12s timeout — agent shells out to `docker system df`, which under
+        // launchd's minimal env / a busy Docker can take several seconds (and
+        // the agent gives it a 6s budget before falling back). Too tight a
+        // timeout makes the Storage section silently empty or forces the
+        // agent's BuildKit value into the host-side metadata fallback.
+        req.timeoutInterval = 12
         req.setValue("MacMonitor/0.1", forHTTPHeaderField: "User-Agent")
         let (data, response): (Data, URLResponse)
         do {

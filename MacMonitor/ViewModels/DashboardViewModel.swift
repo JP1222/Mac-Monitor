@@ -55,6 +55,11 @@ public final class DashboardViewModel: ObservableObject {
 
     private var timerCancellable: AnyCancellable?
     private var settingsObserver: AnyCancellable?
+    /// `start()` is invoked from `.onAppear`, which fires on EVERY popover
+    /// open. This guard makes the one-time setup (Touch ID unlock prompt,
+    /// settings subscription, initial refresh + timer) idempotent — otherwise
+    /// every open re-prompts Touch ID and re-subscribes.
+    private var didStart = false
 
     public init(
         github: GitHubClienting = MockGitHubClient(),
@@ -82,6 +87,11 @@ public final class DashboardViewModel: ObservableObject {
     /// popover open. When the Touch ID gate is enabled, first prompts for
     /// biometric auth — only proceeds to fetching after the user authorizes.
     public func start() {
+        // Idempotent: `.onAppear` calls this on every popover open. Run the
+        // one-time setup once; the 15s timer keeps data fresh thereafter.
+        guard !didStart else { return }
+        didStart = true
+
         Task { [weak self] in
             // If gate enabled and not yet unlocked, prompt before fetching.
             if UserSettings.touchIDGateEnabled {
@@ -116,6 +126,7 @@ public final class DashboardViewModel: ObservableObject {
         timerCancellable = nil
         settingsObserver?.cancel()
         settingsObserver = nil
+        didStart = false
     }
 
     private func restartTimer() {
