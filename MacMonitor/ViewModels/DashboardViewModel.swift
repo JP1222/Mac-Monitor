@@ -344,8 +344,9 @@ public final class DashboardViewModel: ObservableObject {
         // Auto-dismiss. Capture the message to detect if a NEW toast
         // arrived in the interim — don't clear someone else's text.
         let captured = message
+        let duration = actionToastDuration
         Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(actionToastDuration * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
             if self?.lastActionToast == captured { self?.lastActionToast = nil }
         }
     }
