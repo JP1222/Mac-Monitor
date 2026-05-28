@@ -32,6 +32,14 @@ public final class DashboardViewModel: ObservableObject {
     @Published public private(set) var isRefreshing = false
     @Published public private(set) var lastError: String?
 
+    /// Set when a user-initiated action (Prune cache / Restart) finishes.
+    /// Auto-cleared after `actionToastDuration` seconds. Drives a green
+    /// toast banner in the popover so users get visible confirmation that
+    /// the action actually happened.
+    @Published public private(set) var lastActionToast: String?
+    @Published public private(set) var isPerformingAction = false
+    private let actionToastDuration: TimeInterval = 4
+
     // MARK: - Dependencies
 
     private let github: GitHubClienting
@@ -308,12 +316,39 @@ public final class DashboardViewModel: ObservableObject {
     // MARK: - Actions
 
     public func restartRunner(on device: Device) async {
-        do { try await agent.restartRunner(on: device); await refresh() }
-        catch { lastError = error.localizedDescription }
+        isPerformingAction = true
+        defer { isPerformingAction = false }
+        do {
+            try await agent.restartRunner(on: device)
+            showActionToast("Runners restarted")
+            await refresh()
+        } catch {
+            lastError = error.localizedDescription
+        }
     }
 
     public func pruneCache(on device: Device) async {
-        do { try await agent.pruneCache(on: device); await refresh() }
-        catch { lastError = error.localizedDescription }
+        isPerformingAction = true
+        defer { isPerformingAction = false }
+        do {
+            try await agent.pruneCache(on: device)
+            showActionToast("BuildKit cache pruned")
+            await refresh()
+        } catch {
+            lastError = error.localizedDescription
+        }
     }
+
+    private func showActionToast(_ message: String) {
+        lastActionToast = message
+        // Auto-dismiss. Capture the message to detect if a NEW toast
+        // arrived in the interim — don't clear someone else's text.
+        let captured = message
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(actionToastDuration * 1_000_000_000))
+            if self?.lastActionToast == captured { self?.lastActionToast = nil }
+        }
+    }
+
+    public func dismissToast() { lastActionToast = nil }
 }

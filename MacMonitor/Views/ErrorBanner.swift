@@ -17,32 +17,55 @@ public struct ErrorBanner: View {
 
     public var body: some View {
         if let message = viewModel.lastError {
-            HStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(MMTokens.tomato)
-                Text(message)
-                    .font(MMFont.rounded(size: 11))
-                    .foregroundStyle(MMTokens.ink)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer()
-                Button {
-                    viewModel.dismissError()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(MMTokens.inkMuted)
-                        .padding(4)
-                }
-                .buttonStyle(.plain)
+            banner(
+                message: message,
+                tint: MMTokens.tomato,
+                background: MMTokens.tomatoGlow,
+                icon: "exclamationmark.triangle.fill",
+                dismiss: { viewModel.dismissError() }
+            )
+        } else if let toast = viewModel.lastActionToast {
+            banner(
+                message: toast,
+                tint: MMTokens.mint,
+                background: MMTokens.mintGlow,
+                icon: "checkmark.circle.fill",
+                dismiss: { viewModel.dismissToast() }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func banner(
+        message: String,
+        tint: Color,
+        background: Color,
+        icon: String,
+        dismiss: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .foregroundStyle(tint)
+            Text(message)
+                .font(MMFont.rounded(size: 11))
+                .foregroundStyle(MMTokens.ink)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(MMTokens.inkMuted)
+                    .padding(4)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(MMTokens.tomatoGlow)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(MMTokens.glassDivider).frame(height: 1)
-            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(background)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(MMTokens.glassDivider).frame(height: 1)
         }
     }
 }

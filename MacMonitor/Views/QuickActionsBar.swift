@@ -17,7 +17,8 @@ public struct QuickActionsBar: View {
             QuickActionButton(
                 systemImage: "chevron.left.forwardslash.chevron.right",
                 label: "Actions",
-                primary: true
+                primary: true,
+                disabled: false
             ) {
                 if let url = viewModel.snapshot.repositories.first?.actionsURL {
                     #if canImport(AppKit)
@@ -26,16 +27,18 @@ public struct QuickActionsBar: View {
                 }
             }
             QuickActionButton(
-                systemImage: "arrow.counterclockwise",
-                label: "Restart"
+                systemImage: viewModel.isPerformingAction ? "ellipsis" : "arrow.counterclockwise",
+                label: viewModel.isPerformingAction ? "Working…" : "Restart",
+                disabled: viewModel.isPerformingAction
             ) {
                 guard let device = viewModel.snapshot.devices.first else { return }
                 Task { await viewModel.restartRunner(on: device) }
             }
             QuickActionButton(
-                systemImage: "trash",
-                label: "Prune cache",
-                tone: MMTokens.amber
+                systemImage: viewModel.isPerformingAction ? "ellipsis" : "trash",
+                label: viewModel.isPerformingAction ? "Working…" : "Prune cache",
+                tone: MMTokens.amber,
+                disabled: viewModel.isPerformingAction
             ) {
                 guard let device = viewModel.snapshot.devices.first else { return }
                 Task { await viewModel.pruneCache(on: device) }
@@ -51,6 +54,7 @@ private struct QuickActionButton: View {
     let label: String
     var tone: Color? = nil
     var primary: Bool = false
+    var disabled: Bool = false
     let action: () -> Void
 
     var body: some View {
@@ -72,8 +76,10 @@ private struct QuickActionButton: View {
                     .stroke(MMTokens.glassBorder, lineWidth: 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .opacity(disabled ? 0.5 : 1)
         }
         .buttonStyle(.plain)
+        .disabled(disabled)
     }
 
     @ViewBuilder
