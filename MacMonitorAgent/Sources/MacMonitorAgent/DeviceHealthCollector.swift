@@ -110,9 +110,21 @@ enum DeviceHealthCollector {
     }
 
     private static func dockerContainersRunning() -> Int {
-        let result = runShell("/usr/local/bin/docker", args: ["ps", "-q"])
+        let result = runShell(dockerBinary, args: ["ps", "-q"])
         if result.exitCode != 0 { return 0 }
         return result.stdout.split(whereSeparator: \.isNewline).filter { !$0.isEmpty }.count
+    }
+
+    /// Resolve a docker binary across Docker Desktop (/usr/local/bin),
+    /// Homebrew (/opt/homebrew/bin), and OrbStack (/Applications/OrbStack.app/...).
+    private static var dockerBinary: String {
+        let candidates = [
+            "/usr/local/bin/docker",
+            "/opt/homebrew/bin/docker",
+            "/Applications/OrbStack.app/Contents/MacOS/xbin/docker",
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+            ?? "/usr/local/bin/docker"   // best-effort default for error path
     }
 
     // MARK: - Disks
@@ -121,20 +133,74 @@ enum DeviceHealthCollector {
         var out: [DiskUsage] = []
         out.append(diskAt(path: "/", layer: .apfsHost, label: "APFS host", sub: "/ on macOS"))
 
-        // OrbStack disk: ~/Library/Group Containers/HUAQ24HBR6.dev.orbstack/data
-        // size is harder to read directly — fall back to its volume's free
-        // space which approximates OrbStack VM disk.
+        // OrbStack VM data dir.
         let orbStackPath = "\(NSHomeDirectory())/Library/Group Containers/HUAQ24HBR6.dev.orbstack/data"
         if FileManager.default.fileExists(atPath: orbStackPath) {
             out.append(diskFolder(path: orbStackPath, layer: .orbStackVM, label: "OrbStack VM", sub: "linux arm64"))
         }
 
-        // BuildKit cache from docker buildx — du on the cache dir.
-        let buildxCache = "\(NSHomeDirectory())/.docker/buildx"
-        if FileManager.default.fileExists(atPath: buildxCache) {
-            out.append(diskFolder(path: buildxCache, layer: .buildKitCache, label: "BuildKit cache", sub: "docker buildx"))
+        // BuildKit cache — `docker system df` is the authoritative source.
+        // For Docker Desktop the actual cache lives INSIDE the Docker VM,
+        // not on the host fs, so host-side du gives garbage. Falls back to
+        // the buildx host dir only if docker isn't reachable.
+        if let cache = buildKitCacheViaDockerDF() {
+            out.append(cache)
+        } else {
+            let buildxCache = "\(NSHomeDirectory())/.docker/buildx"
+            if FileManager.default.fileExists(atPath: buildxCache) {
+                out.append(diskFolder(path: buildxCache, layer: .buildKitCache, label: "BuildKit cache", sub: "docker buildx (metadata)"))
+            }
         }
         return out
+    }
+
+    /// Parse `docker system df` and return the Build Cache row as a
+    /// DiskUsage. The denominator is fixed at 30GB to match the design's
+    /// "cache pressure" semantics — when cache > 30GB the meter shows
+    /// 100% (clamped) and the user gets a clear "time to prune" signal.
+    private static func buildKitCacheViaDockerDF() -> DiskUsage? {
+        let result = runShell(dockerBinary, args: ["system", "df"])
+        guard result.exitCode == 0 else { return nil }
+        // Lines look like:
+        //   Build Cache     216       0         21.26GB   21.26GB
+        for raw in result.stdout.split(whereSeparator: \.isNewline) {
+            let line = String(raw)
+            guard line.hasPrefix("Build Cache") else { continue }
+            // Whitespace-collapse split.
+            let parts = line.split(separator: " ", omittingEmptySubsequences: true)
+            // Columns: ["Build", "Cache", TOTAL, ACTIVE, SIZE, RECLAIMABLE, ...]
+            // SIZE is index 4 because "Build" and "Cache" are 2 tokens.
+            guard parts.count >= 5, let used = parseDockerSize(String(parts[4])) else { continue }
+            let denominator: Int64 = 30_000_000_000   // 30 GB design threshold
+            let total = max(used, denominator)
+            return DiskUsage(
+                layer: .buildKitCache,
+                label: "BuildKit cache",
+                sub: "docker buildx",
+                usedBytes: used,
+                totalBytes: total,
+                state: tone(for: used, total: denominator)
+            )
+        }
+        return nil
+    }
+
+    /// Parse Docker's human-readable size strings: "21.26GB", "151.6kB",
+    /// "0B", "1.718GB". Docker uses decimal units (1 GB = 1_000_000_000).
+    private static func parseDockerSize(_ s: String) -> Int64? {
+        let units: [(suffix: String, multiplier: Double)] = [
+            ("GB", 1_000_000_000),
+            ("MB", 1_000_000),
+            ("kB", 1_000),
+            ("B",  1),
+        ]
+        for (suffix, mult) in units where s.hasSuffix(suffix) {
+            let numStr = String(s.dropLast(suffix.count))
+            if let num = Double(numStr) {
+                return Int64(num * mult)
+            }
+        }
+        return nil
     }
 
     private static func diskAt(path: String, layer: DiskUsage.Layer, label: String, sub: String) -> DiskUsage {
@@ -172,7 +238,7 @@ enum DeviceHealthCollector {
     // MARK: - Shell helper
 
     @discardableResult
-    private static func runShell(_ path: String, args: [String], timeout: TimeInterval = 2) -> (exitCode: Int32, stdout: String) {
+    private static func runShell(_ path: String, args: [String], timeout: TimeInterval = 3) -> (exitCode: Int32, stdout: String) {
         guard FileManager.default.isExecutableFile(atPath: path) else {
             return (127, "")
         }
@@ -187,10 +253,13 @@ enum DeviceHealthCollector {
         } catch {
             return (1, "")
         }
-        // crude timeout
+        // Poll with timeout — if it overruns, send SIGTERM, then wait for
+        // the task to actually die. Reading `terminationStatus` while the
+        // task is still running throws NSInvalidArgumentException.
         let deadline = Date().addingTimeInterval(timeout)
         while task.isRunning && Date() < deadline { usleep(20_000) }
         if task.isRunning { task.terminate() }
+        task.waitUntilExit()
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         return (task.terminationStatus, String(data: data, encoding: .utf8) ?? "")
     }
