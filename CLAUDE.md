@@ -66,8 +66,8 @@ GUI iteration: open `MacMonitor.xcodeproj`, ⌘R the `MacMonitor` scheme.
 
 ### `Process` (NSTask) has two foot-guns
 - `task.terminationStatus` before `task.waitUntilExit()` throws `NSInvalidArgumentException`. ([Apple docs](https://developer.apple.com/documentation/foundation/process/1415801-terminationstatus))
-- If the child writes >~64KB to stdout/stderr, calling `waitUntilExit()` before draining the pipe **deadlocks** — the child blocks on a full pipe, you block on the child. Drain via `pipe.fileHandleForReading.readabilityHandler` on a background queue, or `readDataToEndOfFile` before waiting. ([Swift Forums — frozen Process](https://forums.swift.org/t/the-problem-with-a-frozen-process-in-swift-process-class/39579))
-- See `runShell` in `MacMonitorAgent/Sources/MacMonitorAgent/DeviceHealthCollector.swift`. Anything that shells to `docker system df` or `git log` could hit the pipe limit.
+- If the child writes >~64KB to a pipe, calling `waitUntilExit()` before draining it **deadlocks** — and this includes **stderr even if you discard it**: an undrained stderr pipe fills and blocks the child just like stdout. Drain BOTH concurrently (background `readDataToEndOfFile`) alongside a timeout watchdog that escalates `SIGTERM → SIGKILL` so a wedged child can't hang forever. ([Swift Forums — frozen Process](https://forums.swift.org/t/the-problem-with-a-frozen-process-in-swift-process-class/39579))
+- Both `runShell` impls (`DeviceHealthCollector`, `AgentActions`) had this; fixed in `2511969`. `docker buildx prune` / `system df -v` easily exceed 64KB.
 
 ### `withTaskGroup` vs `withThrowingTaskGroup`
 - For "fetch N independent endpoints, tolerate per-endpoint failure": `withTaskGroup` (non-throwing) + `try? await ... ?? defaultValue`.
@@ -87,11 +87,20 @@ GUI iteration: open `MacMonitor.xcodeproj`, ⌘R the `MacMonitor` scheme.
 - `KeepAlive=true` implicitly sets `RunAtLoad=true`. ([launchd.plist(5)](https://keith.github.io/xcode-man-pages/launchd.plist.5.html))
 - launchd sends `SIGTERM`, then `SIGKILL` after ~5–20s grace. Daemons that don't flush on `SIGTERM` lose state on logout/reboot. Our agent is stateless, so this is a non-issue today — install a signal handler if you add caching.
 
+### Local agent HTTP server: loopback + authenticated
+- The agent exposes **mutating** POSTs (prune cache, restart runners). `NWListener` with no `requiredLocalEndpoint` binds `0.0.0.0` — the whole LAN can hit it. Pin to `.ipv4(.loopback)`. Fixed in `2511969`.
+- Loopback alone doesn't stop browser CSRF (a page can `fetch('http://127.0.0.1:8765/...')`). Gate mutating routes behind a shared-secret `Bearer` token the app provisions in the App Group container (`SnapshotStore.agentToken` ↔ agent's `AgentToken`, same file by absolute path). GET stays open. The agent parses request-line + headers only, so header auth lives in `HTTPServer.serve`.
+- Don't block the accept loop: run shell-outs on a concurrent work queue, not the serial connection queue.
+
 ## GitHub Actions API specifics
 
 ### Job → runner stitching
 - `GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs` returns `runner_name` per job (nullable string). ([GitHub REST docs](https://docs.github.com/en/rest/actions/workflow-jobs))
-- Match `WorkflowJob.runner_name == Runner.name` exactly. Don't use `availableJobs.removeFirst()` approximation — it silently misassigns when multiple runners are busy.
+- Match `WorkflowJob.runner_name == Runner.name` exactly. The old `availableJobs.removeFirst()` fallback silently misassigned a (possibly cross-repo) job to the wrong card — removed in `ecc2a28`. No match → leave `currentJob` nil (placeholder).
+
+### A run can be `queued` while its jobs are `in_progress`
+- A run's `status` stays `queued` until ALL its jobs leave queued. So a parallel run is `queued` at the run level while individual jobs already run `in_progress` on runners. Querying only `runs?status=in_progress` misses them → busy runners stuck on "Job starting…". Fetch `in_progress` AND `queued` runs, then filter to `in_progress` jobs. Fixed in `16ddf2d`.
+- Nullable fields bite: `head_branch`/`head_sha` are `null` for tag pushes & fork PRs; a non-optional decode fails the WHOLE response. Keep run/job DTO fields optional, and branch result mapping on `status` first (a completed run with an unknown `conclusion` is a failure, not a perpetual spinner).
 
 ### `/runners` and `/runs|/jobs` skew
 - The two endpoints can disagree in the same poll window: `runs/jobs` may show `queued` while `runners` shows the runner as `online & not busy` (or vice versa). ([Community #186811](https://github.com/orgs/community/discussions/186811))
@@ -125,7 +134,7 @@ Mac Monitor watches Yolo-Rollo CI, which runs on this MacBook Pro via self-hoste
 | Symptom | First check |
 | --- | --- |
 | Build errors after pull | `xcodegen generate` — `project.yml` often drifts ahead of cached `.xcodeproj` state |
-| Widget shows stale data | `~/Library/Group Containers/<team>.com.jp1222.macmonitor/snapshot.json` exists? if not, launch the app once |
+| Widget shows stale data | does `~/Library/Group Containers/group.com.jp1222.macmonitor/Library/Application Support/dashboard.snapshot.v1.json` exist? if not, launch the app once. (Note: a degraded refresh deliberately does NOT overwrite this, to preserve last-good for the widget.) |
 | Widget never updates | App must call `WidgetCenter.shared.reloadAllTimelines()` after writing — `didChangeNotification` doesn't cross processes |
 | Agent unreachable | `curl http://127.0.0.1:8765/health` and `launchctl list \| grep macmonitor-agent` |
 | Settings window opens behind other apps | Need the `setActivationPolicy(.regular)` flip pattern (or AppKit `NSWindow` like this project uses) |
