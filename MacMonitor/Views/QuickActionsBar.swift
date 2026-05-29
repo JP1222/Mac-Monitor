@@ -16,7 +16,7 @@ public struct QuickActionsBar: View {
         HStack(spacing: 6) {
             QuickActionButton(
                 systemImage: "chevron.left.forwardslash.chevron.right",
-                label: "Actions",
+                label: "Open Actions on GitHub",
                 primary: true,
                 disabled: false
             ) {
@@ -26,23 +26,12 @@ public struct QuickActionsBar: View {
                     #endif
                 }
             }
-            QuickActionButton(
-                systemImage: viewModel.isPerformingAction ? "ellipsis" : "arrow.counterclockwise",
-                label: viewModel.isPerformingAction ? "Working…" : "Restart",
-                disabled: viewModel.isPerformingAction
-            ) {
-                guard let device = viewModel.snapshot.devices.first else { return }
-                Task { await viewModel.restartRunner(on: device) }
-            }
-            QuickActionButton(
-                systemImage: viewModel.isPerformingAction ? "ellipsis" : "trash",
-                label: viewModel.isPerformingAction ? "Working…" : "Prune cache",
-                tone: MMTokens.amber,
-                disabled: viewModel.isPerformingAction
-            ) {
-                guard let device = viewModel.snapshot.devices.first else { return }
-                Task { await viewModel.pruneCache(on: device) }
-            }
+            // Restart / Prune buttons intentionally removed: they act on the
+            // LOCAL agent's runner LaunchAgents, but this setup runs runners on
+            // a remote machine and schedules them externally — so the buttons
+            // could never succeed here and only produced confusing errors.
+            // The agent-side actions + ViewModel methods remain for a future
+            // setup that wants in-app control.
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
