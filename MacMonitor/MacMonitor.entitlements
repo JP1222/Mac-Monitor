@@ -2,18 +2,26 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- App sandbox is required for App Store distribution. WidgetKit
-         extensions can only share data with their containing app via an App
-         Group container; both targets must declare the SAME group ID. -->
-    <key>com.apple.security.app-sandbox</key>
-    <true/>
+    <!-- NO app-sandbox (deliberately). The app bundles the local-health agent
+         and registers it as a LaunchAgent via SMAppService (AgentInstaller).
+         macOS forbids a SANDBOXED app from registering a NON-sandboxed helper
+         (anti-sandbox-escape) — and the agent MUST be non-sandboxed to shell
+         out to docker / du / launchctl. So the host app drops its sandbox.
+         This is a personal, non-App-Store tool, so losing sandbox is fine.
+         The WidgetKit extension stays sandboxed; data still flows through the
+         App Group *container file* (SnapshotStore via containerURL), which an
+         un-sandboxed app reaches as long as it keeps the app-groups entitlement
+         below. -->
 
-    <!-- Outbound HTTP to GitHub Actions API + the local Mac-mini agent. -->
+    <!-- Outbound HTTP to GitHub Actions API + the local Mac-mini agent.
+         (No-op without the sandbox, but harmless — left for clarity.) -->
     <key>com.apple.security.network.client</key>
     <true/>
 
-    <!-- App Group: shared UserDefaults + container directory between the
-         menu bar app (writer) and the widget extension (reader). -->
+    <!-- App Group: the container directory shared between the menu bar app
+         (writer of dashboard.snapshot.v1.json) and the widget (reader). REQUIRED
+         even un-sandboxed so containerURL(forSecurityApplicationGroupIdentifier:)
+         resolves to the same group container the sandboxed widget sees. -->
     <key>com.apple.security.application-groups</key>
     <array>
         <string>group.com.jp1222.macmonitor</string>

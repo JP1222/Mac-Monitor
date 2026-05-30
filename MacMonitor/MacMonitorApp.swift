@@ -36,6 +36,12 @@ struct MacMonitorApp: App {
         // Mac sign in here. Safe to call unconditionally — falls back to
         // local UserDefaults if iCloud is unavailable.
         UserSettings.startObservingICloud()
+
+        // Register the bundled local agent as a LaunchAgent (SMAppService) so
+        // the Storage panel gets live local-device health with no manual
+        // install. Idempotent + non-fatal on failure. Local Mac only — remote
+        // build-farm Macs install their own agent. See AgentInstaller.
+        AgentInstaller.ensureRegistered()
     }
 
     var body: some Scene {

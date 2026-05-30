@@ -65,10 +65,35 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jp1222.macmonitor
         CODE_SIGN_ENTITLEMENTS: MacMonitor/MacMonitor.entitlements
-        ENABLE_APP_SANDBOX: YES
+        # NO sandbox: the app registers the bundled non-sandboxed agent via
+        # SMAppService, which macOS forbids from a sandboxed host (anti-escape).
+        # See MacMonitor.entitlements for the full rationale. Widget stays sandboxed.
+        ENABLE_APP_SANDBOX: NO
         COMBINE_HIDPI_IMAGES: YES
     dependencies:
       - target: MacMonitorWidgets
+      # Bundle the local-health agent INSIDE the app and copy it to
+      # Contents/MacOS/macmonitor-agent. `link: false` — it's a standalone
+      # executable, not a library to link. SMAppService (AgentInstaller)
+      # registers it on launch; the agent-bundle.plist below points at this
+      # exact path via BundleProgram.
+      - target: MacMonitorAgent
+        link: false
+        copy:
+          destination: executables
+    postCompileScripts:
+      - name: Embed agent LaunchAgent plist
+        # SMAppService.agent(plistName:) requires the launchd plist at
+        # <app>/Contents/Library/LaunchAgents/<plistName>. XcodeGen has no
+        # first-class copy-to-LaunchAgents, so drop it in by hand. Runs before
+        # the final code-sign, so the plist is sealed into the bundle.
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          LA_DIR="${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Library/LaunchAgents"
+          mkdir -p "$LA_DIR"
+          cp "${SRCROOT}/MacMonitorAgent/launchd/agent-bundle.plist" \
+             "$LA_DIR/com.jp1222.macmonitor-agent.plist"
 
   MacMonitorWidgets:
     type: app-extension
@@ -89,4 +114,25 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.jp1222.macmonitor.widgets
         CODE_SIGN_ENTITLEMENTS: MacMonitorWidgets/MacMonitorWidgets.entitlements
         ENABLE_APP_SANDBOX: YES
+        SKIP_INSTALL: YES
+
+  # Local-health daemon, embedded in the app and registered via SMAppService
+  # (see AgentInstaller). The SAME sources also build standalone as a SwiftPM
+  # executable (MacMonitorAgent/Package.swift) for install on remote build-farm
+  # Macs — one source tree, two build systems.
+  MacMonitorAgent:
+    type: tool
+    platform: macOS
+    sources:
+      - path: MacMonitorAgent/Sources/MacMonitorAgent
+    settings:
+      base:
+        PRODUCT_NAME: macmonitor-agent
+        PRODUCT_BUNDLE_IDENTIFIER: com.jp1222.macmonitor-agent
+        # NO app sandbox: the agent shells out to docker / du / pgrep /
+        # launchctl, all of which the sandbox forbids. Hardened runtime stays
+        # ON (inherited from base) — it spawns those as subprocesses rather
+        # than loading their libraries, so library validation never trips, and
+        # SMAppService can still verify the signature against the host app.
+        ENABLE_APP_SANDBOX: NO
         SKIP_INSTALL: YES
