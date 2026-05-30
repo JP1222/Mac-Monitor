@@ -24,8 +24,8 @@ enum TimeRange: String, CaseIterable, Identifiable {
 
 struct OverviewWindow: View {
     @EnvironmentObject private var viewModel: DashboardViewModel
+    @EnvironmentObject private var nav: NavModel
 
-    @State private var navSelection: NavSection? = .overview
     @State private var selectedRunnerID: String?
     @State private var range: TimeRange = .live
     @State private var searchText = ""
@@ -34,11 +34,11 @@ struct OverviewWindow: View {
 
     var body: some View {
         NavigationSplitView {
-            OverviewSidebar(snapshot: snapshot, selection: $navSelection)
+            OverviewSidebar(snapshot: snapshot, selection: $nav.section)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 300)
         } detail: {
             detail
-                .navigationTitle(navSelection?.label ?? "Overview")
+                .navigationTitle(nav.section?.label ?? "Overview")
                 // No navigationSubtitle — it forced a 2-line title block that
                 // made the toolbar a tall band. The live status already shows in
                 // the sidebar header and the FLEET row.
@@ -55,15 +55,18 @@ struct OverviewWindow: View {
 
     @ViewBuilder
     private var detail: some View {
-        switch navSelection ?? .overview {
+        switch nav.section ?? .overview {
         case .overview:
             overviewContent
+        case .settings:
+            // Settings shows INLINE in the window's detail — no popup window.
+            SettingsView()
         case .runners, .queue, .history, .storage, .notifications:
             // Native empty-state component. These sections are real, selectable
             // destinations; their full detail views are the next build.
             ContentUnavailableView(
-                (navSelection ?? .overview).label,
-                systemImage: (navSelection ?? .overview).systemImage,
+                (nav.section ?? .overview).label,
+                systemImage: (nav.section ?? .overview).systemImage,
                 description: Text("This view is coming next — the Overview has the full picture for now.")
             )
             .background(MMTokens.glassStrong)
@@ -108,11 +111,12 @@ struct OverviewWindow: View {
             .help("Open this repo's Actions on GitHub")
 
             Button {
-                SettingsWindowController.show(viewModel: viewModel)
+                nav.section = .settings
             } label: {
                 Image(systemName: "gearshape")
             }
             .help("Settings (⌘,)")
+            .keyboardShortcut(",", modifiers: .command)
         }
     }
 

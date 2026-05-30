@@ -27,6 +27,10 @@ struct MacMonitorApp: App {
         refreshInterval: 15
     )
 
+    // Shared navigation state — lets the menu-bar gear and ⌘, drive the
+    // window's selected section (Settings shows inline, not as a popup window).
+    @StateObject private var nav = NavModel()
+
     init() {
         // Observe iCloud settings sync. Safe to call unconditionally — falls
         // back to local UserDefaults if iCloud is unavailable.
@@ -46,6 +50,7 @@ struct MacMonitorApp: App {
         WindowGroup(id: OverviewWindowID.overview) {
             OverviewWindow()
                 .environmentObject(viewModel)
+                .environmentObject(nav)
                 .onAppear { viewModel.start() }
         }
         // Native unified titlebar+toolbar (NavigationSplitView supplies the
@@ -54,14 +59,11 @@ struct MacMonitorApp: App {
         .windowResizability(.contentMinSize)
         .defaultSize(width: 1440, height: 940)
         .commands {
-            // Native "Settings…" app-menu item + ⌘, — opens the AppKit-hosted
-            // SettingsWindowController (a SwiftUI `Settings` scene is avoided in
-            // this LSUIElement app).
+            // Native "Settings…" app-menu item + ⌘, — selects the inline
+            // Settings section in the window (no separate Settings window).
             CommandGroup(replacing: .appSettings) {
-                Button("Settings…") {
-                    SettingsWindowController.show(viewModel: viewModel)
-                }
-                .keyboardShortcut(",", modifiers: .command)
+                Button("Settings…") { nav.section = .settings }
+                    .keyboardShortcut(",", modifiers: .command)
             }
         }
 
@@ -70,10 +72,12 @@ struct MacMonitorApp: App {
         MenuBarExtra("Mac Monitor", systemImage: "hexagon.fill") {
             MenuBarRootView()
                 .environmentObject(viewModel)
+                .environmentObject(nav)
                 .onAppear { viewModel.start() }
         }
         .menuBarExtraStyle(.window)
-        // Settings is shown via AppKit NSWindow (see SettingsWindowController).
+        // Settings is an inline section of the Overview window (NavModel /
+        // NavSection.settings), not a separate window.
     }
 }
 

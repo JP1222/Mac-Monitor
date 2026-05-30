@@ -11,8 +11,12 @@ import SwiftUI
 /// The sidebar's selectable sections. Only `.overview` has a full detail today;
 /// the rest are real, selectable destinations wired to lightweight detail views.
 enum NavSection: String, Hashable, Identifiable, CaseIterable {
-    case overview, runners, queue, history, storage, notifications
+    case overview, runners, queue, history, storage, notifications, settings
     var id: String { rawValue }
+
+    /// The primary nav group — everything except Settings, which gets its own
+    /// bottom group like a real macOS sidebar.
+    static let primary: [NavSection] = [.overview, .runners, .queue, .history, .storage, .notifications]
 
     var label: String {
         switch self {
@@ -22,6 +26,7 @@ enum NavSection: String, Hashable, Identifiable, CaseIterable {
         case .history: return "History"
         case .storage: return "Storage"
         case .notifications: return "Notifications"
+        case .settings: return "Settings"
         }
     }
     var systemImage: String {
@@ -32,8 +37,17 @@ enum NavSection: String, Hashable, Identifiable, CaseIterable {
         case .history: return "clock.arrow.circlepath"
         case .storage: return "internaldrive"
         case .notifications: return "bell"
+        case .settings: return "gearshape"
         }
     }
+}
+
+/// App-level navigation state so external triggers (the menu-bar gear, ⌘,) can
+/// drive the window's selected section — Settings shows INLINE in the window,
+/// not as a separate popup window.
+@MainActor
+final class NavModel: ObservableObject {
+    @Published var section: NavSection? = .overview
 }
 
 struct OverviewSidebar: View {
@@ -43,7 +57,7 @@ struct OverviewSidebar: View {
     var body: some View {
         List(selection: $selection) {
             Section {
-                ForEach(NavSection.allCases) { section in
+                ForEach(NavSection.primary) { section in
                     Label(section.label, systemImage: section.systemImage)
                         .badge(badge(for: section))
                         .tag(section)
@@ -56,6 +70,11 @@ struct OverviewSidebar: View {
                         repoRow(repo, color: repoColors[idx % repoColors.count])
                     }
                 }
+            }
+
+            Section {
+                Label(NavSection.settings.label, systemImage: NavSection.settings.systemImage)
+                    .tag(NavSection.settings)
             }
         }
         .listStyle(.sidebar)

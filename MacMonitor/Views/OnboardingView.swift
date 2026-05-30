@@ -8,9 +8,12 @@
 // the user pastes their PAT + configures repos.
 
 import SwiftUI
+import AppKit
 
 public struct OnboardingView: View {
     @EnvironmentObject private var viewModel: DashboardViewModel
+    @EnvironmentObject private var nav: NavModel
+    @Environment(\.openWindow) private var openWindow
 
     public init() {}
 
@@ -45,7 +48,12 @@ public struct OnboardingView: View {
                     title: "Open Settings",
                     subtitle: "Paste the token (it goes straight to your Keychain — never to disk or this chat)",
                     actionLabel: "Open Settings",
-                    action: { SettingsWindowController.show(viewModel: viewModel) }
+                    action: {
+                        nav.section = .settings
+                        NSApp.setActivationPolicy(.regular)
+                        openWindow(id: OverviewWindowID.overview)
+                        NSApp.activate(ignoringOtherApps: true)
+                    }
                 )
                 step(
                     number: 3,

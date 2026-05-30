@@ -5,9 +5,12 @@
 // settings). Direct port of MBAPopover's header block.
 
 import SwiftUI
+import AppKit
 
 public struct PopoverHeader: View {
     @EnvironmentObject private var viewModel: DashboardViewModel
+    @EnvironmentObject private var nav: NavModel
+    @Environment(\.openWindow) private var openWindow
 
     public init() {}
 
@@ -35,10 +38,13 @@ public struct PopoverHeader: View {
                 Task { await viewModel.refresh() }
             }
             iconButton(systemName: "gearshape", help: "Settings") {
-                // Open Settings via AppKit (LSUIElement apps can't open
-                // SwiftUI Window scenes). The popover dismisses as the
-                // window takes focus, which is fine.
-                SettingsWindowController.show(viewModel: viewModel)
+                // Open the main window and select the inline Settings section —
+                // no separate Settings window. Set the section first so the
+                // window shows Settings whether it's already open or just opened.
+                nav.section = .settings
+                NSApp.setActivationPolicy(.regular)
+                openWindow(id: OverviewWindowID.overview)
+                NSApp.activate(ignoringOtherApps: true)
             }
         }
         .padding(.horizontal, 14)

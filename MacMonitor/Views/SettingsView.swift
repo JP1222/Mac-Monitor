@@ -1,8 +1,9 @@
 // SettingsView.swift
 //
-// Native macOS settings, rebuilt as a grouped `Form` (the System-Settings
-// look). Hosted in an AppKit window via SettingsWindowController — see that
-// file for why a SwiftUI `Settings` scene is avoided in this LSUIElement app.
+// Native macOS settings, a grouped `Form` (the System-Settings look). Shown
+// INLINE in the Overview window's detail column (NavSection.settings) — not a
+// separate window. Reached via the sidebar "Settings" item, the toolbar gear,
+// ⌘,, or the menu-bar popover's gear (which opens the window + selects it).
 //
 // Native settings apply LIVE: toggles, the interval picker, and the repo/device
 // lists persist to UserSettings on change (which posts didChangeNotification →
@@ -42,7 +43,7 @@ public struct SettingsView: View {
             aboutSection
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 600)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear(perform: load)
     }
 
@@ -295,4 +296,5 @@ public struct SettingsView: View {
 #Preview {
     SettingsView()
         .environmentObject(DashboardViewModel(refreshInterval: 999))
+        .frame(width: 520, height: 600)
 }
