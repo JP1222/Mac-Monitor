@@ -54,12 +54,24 @@ public enum KeychainStore {
         // grabs a trailing newline.
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         try set(value: trimmed, service: githubTokenService, account: githubTokenAccount)
+        invalidateTokenCache()
     }
 
     /// Session-level unlock flag. When `UserSettings.touchIDGateEnabled` is
     /// true and this is false, `readGitHubToken()` returns nil to force the
     /// caller to `unlockSession()` first. Reset on process restart.
     private static var sessionUnlocked = false
+
+    // In-memory token cache. GitHubClient reads the token on EVERY API call by
+    // design (so rotation takes effect live), and each 15s refresh fans out ~5+
+    // calls per repo — a burst of keychain reads every cycle. If the keychain
+    // item's ACL ever prompts (e.g. a differently-signed build reads an item
+    // saved by another), that burst becomes a storm of "allow access" dialogs.
+    // Caching collapses it to ONE read per process; we invalidate on
+    // save/delete/lock so a freshly-set or rotated token is still picked up.
+    private static let cacheLock = NSLock()
+    private static var cachedToken: String?
+    private static var tokenCacheValid = false
 
     public static func readGitHubToken() -> String? {
         // If the Touch ID gate is on and the user hasn't unlocked this
@@ -70,7 +82,22 @@ public enum KeychainStore {
         if UserSettings.touchIDGateEnabled && !sessionUnlocked {
             return nil
         }
-        return try? get(service: githubTokenService, account: githubTokenAccount)
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        if tokenCacheValid { return cachedToken }
+        let value = try? get(service: githubTokenService, account: githubTokenAccount)
+        cachedToken = value
+        tokenCacheValid = true
+        return value
+    }
+
+    /// Drop the cached token so the next read hits the keychain again. Called
+    /// after the token is saved/deleted or the session lock state changes.
+    public static func invalidateTokenCache() {
+        cacheLock.lock()
+        cachedToken = nil
+        tokenCacheValid = false
+        cacheLock.unlock()
     }
 
     /// Triggers the Touch ID prompt (or device password fallback) and on
@@ -115,6 +142,7 @@ public enum KeychainStore {
 
     public static func deleteGitHubToken() throws {
         try delete(service: githubTokenService, account: githubTokenAccount)
+        invalidateTokenCache()
     }
 
     /// Presence check — does a token exist in the keychain? Uses an
