@@ -35,12 +35,11 @@ enum SettingsWindowController {
         let hosting = NSHostingController(
             rootView: SettingsView().environmentObject(viewModel)
         )
-        // Force the desired size: our SettingsView declares frame 460x480.
-        hosting.preferredContentSize = NSSize(width: 460, height: 480)
+        hosting.preferredContentSize = NSSize(width: 520, height: 600)
 
         let newWindow = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 480),
-            styleMask: [.titled, .closable],
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 600),
+            styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -55,12 +54,20 @@ enum SettingsWindowController {
     }
 }
 
-/// Demote app activation policy back to `.accessory` when the user closes
-/// the Settings window — otherwise the Dock would keep showing our icon.
+/// On Settings close, demote back to `.accessory` ONLY when no main window is
+/// open — so the menu-bar-only case returns to no-Dock-icon, but closing
+/// Settings while the primary Overview window is up does NOT yank the Dock icon
+/// (and focus) out from under it.
 @MainActor
 private final class SettingsWindowDelegate: NSObject, NSWindowDelegate {
     static let shared = SettingsWindowDelegate()
     func windowWillClose(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        let closing = notification.object as? NSWindow
+        let hasMainWindow = NSApp.windows.contains {
+            $0 !== closing && $0.isVisible && $0.styleMask.contains(.titled) && $0.canBecomeMain
+        }
+        if !hasMainWindow {
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 }

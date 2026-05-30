@@ -53,6 +53,17 @@ struct MacMonitorApp: App {
         // — we want the real system chrome now.
         .windowResizability(.contentMinSize)
         .defaultSize(width: 1440, height: 940)
+        .commands {
+            // Native "Settings…" app-menu item + ⌘, — opens the AppKit-hosted
+            // SettingsWindowController (a SwiftUI `Settings` scene is avoided in
+            // this LSUIElement app).
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    SettingsWindowController.show(viewModel: viewModel)
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+        }
 
         // Quick-glance surface: the menu bar popover, with an "Open Main
         // Window" shortcut prepended (MenuBarRootView).

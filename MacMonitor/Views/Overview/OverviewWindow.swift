@@ -106,6 +106,13 @@ struct OverviewWindow: View {
                 Label("Open on GitHub", systemImage: "arrow.up.forward.square")
             }
             .help("Open this repo's Actions on GitHub")
+
+            Button {
+                SettingsWindowController.show(viewModel: viewModel)
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .help("Settings (⌘,)")
         }
     }
 
