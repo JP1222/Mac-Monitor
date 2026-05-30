@@ -34,15 +34,20 @@ public struct PopoverHeader: View {
 
             Spacer()
 
+            iconButton(systemName: "macwindow", help: "Open main window") {
+                // Jump to the main window (Overview). No `.regular` flip — the
+                // app stays `.accessory` (no Dock icon); activate is enough to
+                // bring the window to the front.
+                nav.section = .overview
+                openWindow(id: OverviewWindowID.overview)
+                NSApp.activate(ignoringOtherApps: true)
+            }
             iconButton(systemName: "arrow.clockwise", help: "Refresh") {
                 Task { await viewModel.refresh() }
             }
             iconButton(systemName: "gearshape", help: "Settings") {
-                // Open the main window and select the inline Settings section —
-                // no separate Settings window. Set the section first so the
-                // window shows Settings whether it's already open or just opened.
+                // Open the main window and select the inline Settings section.
                 nav.section = .settings
-                NSApp.setActivationPolicy(.regular)
                 openWindow(id: OverviewWindowID.overview)
                 NSApp.activate(ignoringOtherApps: true)
             }

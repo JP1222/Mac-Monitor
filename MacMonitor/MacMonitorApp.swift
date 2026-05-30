@@ -1,15 +1,13 @@
 // MacMonitorApp.swift
 //
-// Entry point. The app now has TWO surfaces:
-//   1. WindowGroup "overview" — the full Overview window, the PRIMARY surface.
-//   2. MenuBarExtra — a quick-glance popover that also opens the window.
+// Entry point. The app has TWO surfaces:
+//   1. WindowGroup "overview" — the full Overview window.
+//   2. MenuBarExtra — the quick-glance popover (also opens the window).
 //
-// `LSUIElement` is still set in Info.plist (project.yml), so the process starts
-// as `.accessory` (no Dock icon). `AppDelegate.applicationDidFinishLaunching`
-// flips it to `.regular` so the primary window foregrounds with a Dock icon on
-// launch — the documented fix for "window opens behind everything" in menu-bar
-// apps (see CLAUDE.md › Opening windows from an LSUIElement app). The
-// MenuBarExtra keeps working in either activation policy.
+// The app is a menu-bar utility: `LSUIElement` (project.yml) keeps it
+// `.accessory` — NO Dock icon. We do NOT flip to `.regular`; the window is
+// brought to the front with `NSApp.activate(ignoringOtherApps:)` instead. The
+// menu-bar icon is managed by the user (e.g. via Bartender).
 
 import SwiftUI
 import AppKit
@@ -67,10 +65,10 @@ struct MacMonitorApp: App {
             }
         }
 
-        // Quick-glance surface: the menu bar popover, with an "Open Main
-        // Window" shortcut prepended (MenuBarRootView).
+        // Quick-glance surface: the menu bar popover. Its header carries a
+        // small "open main window" icon (PopoverHeader) — no big button.
         MenuBarExtra("Mac Monitor", systemImage: "hexagon.fill") {
-            MenuBarRootView()
+            PopoverView()
                 .environmentObject(viewModel)
                 .environmentObject(nav)
                 .onAppear { viewModel.start() }
@@ -81,20 +79,21 @@ struct MacMonitorApp: App {
     }
 }
 
-/// Handles the activation-policy dance an `LSUIElement` app needs to show a
-/// real window, plus reopening the window on Dock-icon click.
+/// Shared window identifier so the scene and every opener agree on one string.
+enum OverviewWindowID {
+    static let overview = "overview"
+}
+
+/// Foregrounds the initial window on launch. Stays `.accessory` (no Dock icon).
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Become a regular app so the primary window can foreground + get a
-        // Dock icon. Without this, the WindowGroup opens behind other apps and
-        // can't be brought forward (no Dock icon to click).
-        NSApp.setActivationPolicy(.regular)
+        // No `setActivationPolicy(.regular)` — we want NO Dock icon. Activating
+        // brings the auto-opened window to the front without a Dock presence.
         NSApp.activate(ignoringOtherApps: true)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        // Dock-icon click with no visible window → bring the Overview back.
         if !flag {
             for window in sender.windows where window.canBecomeMain {
                 window.makeKeyAndOrderFront(nil)

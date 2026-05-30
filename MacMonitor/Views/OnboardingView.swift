@@ -50,7 +50,6 @@ public struct OnboardingView: View {
                     actionLabel: "Open Settings",
                     action: {
                         nav.section = .settings
-                        NSApp.setActivationPolicy(.regular)
                         openWindow(id: OverviewWindowID.overview)
                         NSApp.activate(ignoringOtherApps: true)
                     }
