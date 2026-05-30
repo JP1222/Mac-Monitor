@@ -69,6 +69,12 @@ public struct DeviceSnapshot: Codable, Identifiable, Hashable, Sendable {
     // System health
     public let cpuLoad: Double                // 0...1 (normalized 1-minute load)
     public let memoryPressurePercent: Double  // 0...100
+    /// Physical memory in use, in bytes. Optional so snapshots written by an
+    /// older agent build (which only sent `memoryPressurePercent`) still decode
+    /// — the fleet card falls back to the percent when these are nil. New agent
+    /// builds always populate both.
+    public let memoryUsedBytes: Int64?
+    public let memoryTotalBytes: Int64?
     public let thermalState: ThermalState
     public let uptimeSeconds: TimeInterval
 
@@ -84,6 +90,8 @@ public struct DeviceSnapshot: Codable, Identifiable, Hashable, Sendable {
         capturedAt: Date,
         cpuLoad: Double,
         memoryPressurePercent: Double,
+        memoryUsedBytes: Int64? = nil,
+        memoryTotalBytes: Int64? = nil,
         thermalState: ThermalState,
         uptimeSeconds: TimeInterval,
         orbStackRunning: Bool,
@@ -95,6 +103,8 @@ public struct DeviceSnapshot: Codable, Identifiable, Hashable, Sendable {
         self.capturedAt = capturedAt
         self.cpuLoad = cpuLoad
         self.memoryPressurePercent = memoryPressurePercent
+        self.memoryUsedBytes = memoryUsedBytes
+        self.memoryTotalBytes = memoryTotalBytes
         self.thermalState = thermalState
         self.uptimeSeconds = uptimeSeconds
         self.orbStackRunning = orbStackRunning
@@ -107,5 +117,22 @@ public struct DeviceSnapshot: Codable, Identifiable, Hashable, Sendable {
     /// should fade or warn.
     public func ageSeconds(now: Date = Date()) -> TimeInterval {
         now.timeIntervalSince(capturedAt)
+    }
+
+    // MARK: - Fleet-card derivations
+
+    /// "4.8/16" style memory string in GB, or nil when the agent didn't report
+    /// byte-level memory (older build). Uses decimal GB (÷1e9) to match the way
+    /// macOS reports RAM ("16 GB"), not GiB.
+    public func memoryUsedTotalGB() -> (used: Double, total: Double)? {
+        guard let used = memoryUsedBytes, let total = memoryTotalBytes, total > 0 else { return nil }
+        return (Double(used) / 1_000_000_000, Double(total) / 1_000_000_000)
+    }
+
+    /// BuildKit cache fullness 0...1 against its design threshold (the layer's
+    /// own totalBytes is pinned to 30 GB by the collector). Drives the fleet
+    /// card "Cache" stat. Nil when no cache layer is present.
+    public var buildKitCacheFraction: Double? {
+        disks.first { $0.layer == .buildKitCache }?.usedFraction
     }
 }

@@ -47,6 +47,8 @@ extension DashboardSnapshot {
             capturedAt: now.addingTimeInterval(-4),
             cpuLoad: 0.62,
             memoryPressurePercent: 41,
+            memoryUsedBytes: 6_560_000_000,   // ~6.6 / 16 GB
+            memoryTotalBytes: 16_000_000_000,
             thermalState: .nominal,
             uptimeSeconds: 3 * 24 * 3600 + 14_152,
             orbStackRunning: true,

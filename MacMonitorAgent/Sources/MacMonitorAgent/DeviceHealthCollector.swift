@@ -28,17 +28,20 @@ enum DeviceHealthCollector {
 
     static func collect() -> DeviceSnapshot {
         let now = Date()
+        let mem = memoryUsage()
         return DeviceSnapshot(
             deviceID: deviceIdentifier(),
             capturedAt: now,
             cpuLoad: cpuLoadOneMinute(),
-            memoryPressurePercent: memoryPressurePercent(),
+            memoryPressurePercent: mem.percent,
+            memoryUsedBytes: mem.used,
+            memoryTotalBytes: mem.total,
             thermalState: thermalState(),
             uptimeSeconds: uptimeSeconds(),
             orbStackRunning: orbStackRunning(),
             dockerContainersRunning: dockerContainersRunning(),
             disks: disks(),
-            agentVersion: "0.1.0"
+            agentVersion: "0.2.0"
         )
     }
 
@@ -62,7 +65,13 @@ enum DeviceHealthCollector {
 
     // MARK: - Memory
 
-    private static func memoryPressurePercent() -> Double {
+    /// One pass over `vm_statistics64` yielding both the pressure percent and
+    /// the raw used/total bytes the fleet card shows as "4.8/16 GB". "Used" =
+    /// active + wired + compressed (the App Memory + Wired + Compressed buckets
+    /// Activity Monitor sums into "Memory Used"), matching what users expect to
+    /// see for a machine running builds.
+    private static func memoryUsage() -> (used: Int64, total: Int64, percent: Double) {
+        let total = Int64(ProcessInfo.processInfo.physicalMemory)
         var size = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.stride / MemoryLayout<integer_t>.stride)
         var stats = vm_statistics64_data_t()
         let result = withUnsafeMutablePointer(to: &stats) {
@@ -70,15 +79,15 @@ enum DeviceHealthCollector {
                 host_statistics64(mach_host_self(), HOST_VM_INFO64, p, &size)
             }
         }
-        guard result == KERN_SUCCESS else { return 0 }
+        guard result == KERN_SUCCESS else { return (0, total, 0) }
         let pageSize = Double(vm_kernel_page_size)
         let active = Double(stats.active_count) * pageSize
         let wired = Double(stats.wire_count) * pageSize
         let compressed = Double(stats.compressor_page_count) * pageSize
-        let used = active + wired + compressed
-        let total = Double(ProcessInfo.processInfo.physicalMemory)
-        guard total > 0 else { return 0 }
-        return min(100, max(0, (used / total) * 100))
+        let used = Int64(active + wired + compressed)
+        guard total > 0 else { return (used, 0, 0) }
+        let percent = min(100, max(0, (Double(used) / Double(total)) * 100))
+        return (used, total, percent)
     }
 
     // MARK: - Thermals

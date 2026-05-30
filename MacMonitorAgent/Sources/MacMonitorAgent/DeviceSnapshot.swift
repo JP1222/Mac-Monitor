@@ -30,6 +30,11 @@ struct DeviceSnapshot: Codable {
     let capturedAt: Date
     let cpuLoad: Double
     let memoryPressurePercent: Double
+    // New in this build. Encoded as plain Int64 — the app-side Shared model
+    // decodes them as optional so an older app keeps working against a newer
+    // agent and vice-versa.
+    let memoryUsedBytes: Int64
+    let memoryTotalBytes: Int64
     let thermalState: ThermalState
     let uptimeSeconds: TimeInterval
     let orbStackRunning: Bool
