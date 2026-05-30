@@ -158,12 +158,22 @@ struct OverviewWindow: View {
 
     @ViewBuilder
     private func mainColumn(fleet: [FleetEntry], kpis: [KpiMetric], hero: Runner?, logsMinHeight: CGFloat?) -> some View {
+        let building = hero?.state == .building
         VStack(alignment: .leading, spacing: 14) {
             FleetStrip(entries: fleet, onSelect: { selectedRunnerID = $0 })
             KpiStrip(metrics: kpis)
-            LiveBuildHero(runner: hero, onOpenRun: open)
-            LogsPanel(lines: logLines(for: hero), isLive: false, context: logContext(for: hero))
-                .frame(minHeight: logsMinHeight, maxHeight: logsMinHeight == nil ? .infinity : nil)
+            if building {
+                // Active build: the live hero (intrinsic) + the streaming logs
+                // terminal, which fills the remaining height.
+                LiveBuildHero(runner: hero, onOpenRun: open)
+                LogsPanel(lines: logLines(for: hero), isLive: false, context: logContext(for: hero))
+                    .frame(minHeight: logsMinHeight, maxHeight: logsMinHeight == nil ? .infinity : nil)
+            } else {
+                // Idle/offline: ONE calm panel that fills the space — no empty
+                // hero stacked on a dark, content-less logs terminal.
+                LiveBuildHero(runner: hero, onOpenRun: open)
+                    .frame(maxHeight: logsMinHeight == nil ? .infinity : nil)
+            }
         }
     }
 

@@ -126,18 +126,25 @@ struct LiveBuildHero: View {
     // MARK: - Calm (idle / offline / no runner)
 
     private func calmHero(runner: Runner?) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                StatusDot(state: runner?.state ?? .offline, pulse: false, size: 9)
-                Text(calmTitle(runner))
-                    .font(MMFont.rounded(size: 10.5, weight: .heavy))
-                    .tracking(0.9).textCase(.uppercase)
-                    .foregroundStyle(MMTokens.tone(for: runner?.state ?? .offline))
-                Spacer(minLength: 0)
+        let tone = MMTokens.tone(for: runner?.state ?? .offline)
+        // Spacers center the content vertically across whatever height the
+        // parent grants (fills in wide mode, ~minHeight in the narrow scroll) —
+        // no internal maxHeight: .infinity, which collapses inside a ScrollView.
+        return VStack(spacing: 12) {
+            Spacer(minLength: 0)
+            ZStack {
+                Circle().fill(tone.opacity(0.12)).frame(width: 56, height: 56)
+                Image(systemName: idleIcon(runner))
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(tone)
             }
-            Text(calmSubtitle(runner))
-                .font(MMFont.rounded(size: 15, weight: .semibold))
+            Text(calmTitle(runner))
+                .font(MMFont.rounded(size: 16, weight: .bold))
                 .foregroundStyle(MMTokens.ink)
+            Text(calmSubtitle(runner))
+                .font(MMFont.rounded(size: 12.5))
+                .foregroundStyle(MMTokens.inkMuted)
+                .multilineTextAlignment(.center)
             if let last = runner?.lastJob {
                 HStack(spacing: 8) {
                     ResultGlyph(result: last.result, size: 16)
@@ -145,11 +152,22 @@ struct LiveBuildHero: View {
                         .font(MMFont.rounded(size: 12))
                         .foregroundStyle(MMTokens.inkMuted)
                 }
+                .padding(.top, 2)
             }
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
-        .padding(EdgeInsets(top: 16, leading: 18, bottom: 16, trailing: 18))
+        .frame(maxWidth: .infinity, minHeight: 240)
+        .padding(24)
         .glassCard()
+    }
+
+    private func idleIcon(_ r: Runner?) -> String {
+        switch r?.state {
+        case .idle: return "checkmark.circle"
+        case .offline: return "powerplug"
+        case .failure: return "xmark.circle"
+        default: return "bolt.slash"
+        }
     }
 
     // MARK: - Helpers

@@ -54,6 +54,7 @@ enum OverviewData {
     static func fleet(from snapshot: DashboardSnapshot, selectedID: String?) -> [FleetEntry] {
         let effectiveSelection = selectedID
             ?? snapshot.runners.first(where: { $0.state == .building })?.id
+            ?? snapshot.runners.first(where: { $0.status != .offline })?.id   // prefer an online runner
             ?? snapshot.runners.first?.id
 
         return snapshot.runners.map { runner in
@@ -85,7 +86,9 @@ enum OverviewData {
     /// else first runner. Returns nil only when there are no runners at all.
     static func heroRunner(from snapshot: DashboardSnapshot, selectedID: String?) -> Runner? {
         if let id = selectedID, let r = snapshot.runners.first(where: { $0.id == id }) { return r }
-        return snapshot.runners.first(where: { $0.state == .building }) ?? snapshot.runners.first
+        return snapshot.runners.first(where: { $0.state == .building })
+            ?? snapshot.runners.first(where: { $0.status != .offline })   // prefer an online runner
+            ?? snapshot.runners.first
     }
 
     /// Exact device-snapshot match for a runner, falling back to the freshest
