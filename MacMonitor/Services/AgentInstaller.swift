@@ -36,9 +36,24 @@ enum AgentInstaller {
     @discardableResult
     static func ensureRegistered() -> SMAppService.Status {
         let svc = service
+        let currentStamp = bundleStamp()
+        let lastStamp = UserDefaults.standard.string(forKey: bundleStampKey)
+
         switch svc.status {
         case .enabled:
-            log.debug("local agent already enabled")
+            // The app bundle was REPLACED since we last registered (an update):
+            // the BTM record still pins the OLD code signature, so launchd spawns
+            // the helper `EX_CONFIG` against the new binary. Re-register to
+            // re-validate against the current bundle. Detected via the
+            // executable's modification date — CFBundleVersion is pinned to "1"
+            // so it can't gate this.
+            if lastStamp != currentStamp {
+                log.notice("local agent bundle changed — re-registering")
+                try? svc.unregister()
+                register(svc)
+            } else {
+                log.debug("local agent already enabled")
+            }
         case .requiresApproval:
             // Left disabled in System Settings → General → Login Items (user
             // toggled it off, or a prior install needs re-approval). We can't
@@ -51,7 +66,20 @@ enum AgentInstaller {
         @unknown default:
             register(svc)
         }
+        UserDefaults.standard.set(currentStamp, forKey: bundleStampKey)
         return svc.status
+    }
+
+    private static let bundleStampKey = "agentRegisteredBundleStamp"
+
+    /// A cheap signature of the current app bundle — the main executable's
+    /// modification date. Changes on every build, so it detects a bundle
+    /// replacement (update) that would otherwise leave a stale registration.
+    private static func bundleStamp() -> String {
+        guard let exe = Bundle.main.executableURL,
+              let attrs = try? FileManager.default.attributesOfItem(atPath: exe.path),
+              let date = attrs[.modificationDate] as? Date else { return "—" }
+        return String(date.timeIntervalSince1970)
     }
 
     private static func register(_ svc: SMAppService) {
