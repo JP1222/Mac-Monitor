@@ -9,6 +9,7 @@
 // RGB-255 conversion in `rgba(_:_:_:_:)` for readability.
 
 import SwiftUI
+import AppKit
 
 public enum MMTokens {
 
@@ -30,21 +31,33 @@ public enum MMTokens {
         return Color(.sRGB, red: r, green: g, blue: b, opacity: opacity)
     }
 
-    // MARK: - Surface (dark glass)
+    /// Appearance-adaptive color. The dark value is the original design token
+    /// (so dark mode is byte-for-byte unchanged); the light value is its
+    /// counterpart so the whole app follows the system light/dark setting. The
+    /// provider closure resolves at draw time against the view's effective
+    /// `NSAppearance`, which SwiftUI drives from the `colorScheme` environment.
+    public static func dynamic(light: Color, dark: Color) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                ? NSColor(dark) : NSColor(light)
+        })
+    }
 
-    public static let glass        = rgba(28, 28, 32, 0.78)
-    public static let glassStrong  = rgba(20, 20, 24, 0.92)
-    public static let glassBorder  = rgba(255, 255, 255, 0.08)
-    public static let glassDivider = rgba(255, 255, 255, 0.06)
-    public static let glassHairline = rgba(255, 255, 255, 0.04)
-    public static let rowHover     = rgba(255, 255, 255, 0.05)
+    // MARK: - Surface (adaptive glass)
 
-    // MARK: - Ink (text on dark)
+    public static let glass         = dynamic(light: rgba(250, 249, 246, 0.72), dark: rgba(28, 28, 32, 0.78))
+    public static let glassStrong   = dynamic(light: hex(0xF2F1ED),             dark: rgba(20, 20, 24, 0.92))
+    public static let glassBorder   = dynamic(light: rgba(0, 0, 0, 0.10),       dark: rgba(255, 255, 255, 0.08))
+    public static let glassDivider  = dynamic(light: rgba(0, 0, 0, 0.08),       dark: rgba(255, 255, 255, 0.06))
+    public static let glassHairline = dynamic(light: rgba(0, 0, 0, 0.06),       dark: rgba(255, 255, 255, 0.04))
+    public static let rowHover      = dynamic(light: rgba(0, 0, 0, 0.05),       dark: rgba(255, 255, 255, 0.05))
 
-    public static let ink          = hex(0xF4F2EE)
-    public static let inkMuted     = hex(0xF4F2EE, opacity: 0.62)
-    public static let inkSoft      = hex(0xF4F2EE, opacity: 0.42)
-    public static let inkFaint     = hex(0xF4F2EE, opacity: 0.26)
+    // MARK: - Ink (adaptive text)
+
+    public static let ink       = dynamic(light: hex(0x1A1A1A),               dark: hex(0xF4F2EE))
+    public static let inkMuted  = dynamic(light: hex(0x1A1A1A, opacity: 0.64), dark: hex(0xF4F2EE, opacity: 0.62))
+    public static let inkSoft   = dynamic(light: hex(0x1A1A1A, opacity: 0.46), dark: hex(0xF4F2EE, opacity: 0.42))
+    public static let inkFaint  = dynamic(light: hex(0x1A1A1A, opacity: 0.30), dark: hex(0xF4F2EE, opacity: 0.26))
 
     // MARK: - Status (YRUI palette lifted onto dark)
 

@@ -47,6 +47,16 @@ public struct RunnersWidgetView: View {
     }
 
     public var body: some View {
+        familyView
+            // Desktop widgets stay dark-glass regardless of system appearance —
+            // they're ambient surfaces over the wallpaper, where the dark look
+            // reads consistently. Pinning here also keeps the now-adaptive
+            // MMTokens resolving to their dark variants inside the widget.
+            .environment(\.colorScheme, .dark)
+    }
+
+    @ViewBuilder
+    private var familyView: some View {
         switch family {
         case .systemSmall:  SmallWidgetView(snapshot: entry.snapshot)
         case .systemMedium: MediumWidgetView(snapshot: entry.snapshot)
