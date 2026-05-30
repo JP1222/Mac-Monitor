@@ -18,15 +18,23 @@ public struct QueueRowView: View {
             ResultGlyph(result: .queued, size: 18)
             if let pr = item.pullRequest {
                 Text("#\(pr)").mmMono(size: 11.5, weight: .semibold, color: MMTokens.ink)
+                    .fixedSize()
             }
+            // Single line — long branch names truncate instead of wrapping to
+            // 2–3 lines (which blew up the popover height).
             Text(item.branch).mmMono(size: 11.5)
-            Spacer()
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 6)
             Text(item.workflow)
                 .font(MMFont.rounded(size: 11))
                 .foregroundStyle(MMTokens.inkMuted)
+                .lineLimit(1)
+                .fixedSize()
             Text(item.waitingPretty())
                 .font(MMFont.rounded(size: 10.5, weight: isLongest ? .bold : .medium))
                 .foregroundStyle(isLongest ? MMTokens.amber : MMTokens.inkSoft)
+                .fixedSize()
         }
         .padding(.vertical, 7)
         .padding(.horizontal, 4)

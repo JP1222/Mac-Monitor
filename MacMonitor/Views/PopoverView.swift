@@ -29,16 +29,14 @@ public struct PopoverView: View {
             if viewModel.hasGitHubToken {
                 ErrorBanner()
                     .environmentObject(viewModel)
-                // Scrollable middle, bounded so the popover can't grow past the
-                // screen and squeeze the footer off. `maxHeight` (not
-                // `.fixedSize`/`ViewThatFits`, which collapse here) keeps it
-                // dynamic when content is short and scrolls when it's tall.
-                ScrollView {
-                    sectionsContent
-                }
-                .frame(minHeight: 220, maxHeight: 460)   // minHeight hedges the collapse-to-0 bug
-                Divider().overlay(MMTokens.glassDivider)
-                QuickActionsBar()                    // pinned bottom — always visible
+                // NO ScrollView — `MenuBarExtra(.window)` + ScrollView resizes
+                // smaller on the 2nd open (Apple Forums #741601). Instead the
+                // sections cap their rows + "+N more", and the row caps are tuned
+                // so the whole popover (header + sections + footer) always fits
+                // without clipping the action bar — the well-behaved menu-bar
+                // app pattern.
+                sectionsContent
+                QuickActionsBar()
                     .environmentObject(viewModel)
             } else {
                 OnboardingView()
@@ -61,9 +59,9 @@ public struct PopoverView: View {
     /// Visible-row caps per section. Anything beyond these limits is summed
     /// into a "+N more" footer link so the popover height stays predictable
     /// (~520pt max with all sections full).
-    private let maxRunners = 6
-    private let maxQueueRows = 5
-    private let maxRecentRows = 5
+    private let maxRunners = 4
+    private let maxQueueRows = 3
+    private let maxRecentRows = 4
 
     @ViewBuilder
     private var sectionsContent: some View {
