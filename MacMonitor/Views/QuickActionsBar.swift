@@ -45,6 +45,7 @@ private struct QuickActionButton: View {
     var primary: Bool = false
     var disabled: Bool = false
     let action: () -> Void
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Button(action: action) {
@@ -74,15 +75,18 @@ private struct QuickActionButton: View {
     @ViewBuilder
     private var buttonBackground: some View {
         if primary {
-            LinearGradient(
-                colors: [
-                    MMTokens.rgba(255, 255, 255, 0.10),
-                    MMTokens.rgba(255, 255, 255, 0.03),
-                ],
-                startPoint: .top, endPoint: .bottom
-            )
+            if scheme == .dark {
+                LinearGradient(
+                    colors: [MMTokens.rgba(255, 255, 255, 0.10), MMTokens.rgba(255, 255, 255, 0.03)],
+                    startPoint: .top, endPoint: .bottom
+                )
+            } else {
+                // Opaque light button (white → faint gray) so the popover
+                // material doesn't bleed through as gray fog.
+                LinearGradient(colors: [.white, MMTokens.hex(0xF1F0EC)], startPoint: .top, endPoint: .bottom)
+            }
         } else {
-            MMTokens.rgba(255, 255, 255, 0.04)
+            MMTokens.cardFill
         }
     }
 }

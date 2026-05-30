@@ -52,6 +52,12 @@ public enum MMTokens {
     public static let glassHairline = dynamic(light: rgba(0, 0, 0, 0.06),       dark: rgba(255, 255, 255, 0.04))
     public static let rowHover      = dynamic(light: rgba(0, 0, 0, 0.05),       dark: rgba(255, 255, 255, 0.05))
 
+    /// Opaque card fill for surfaces that sit ON a Material (popover chips,
+    /// buttons): solid white in light so the material below doesn't bleed
+    /// through a near-transparent fill as a gray "fog"; the original translucent
+    /// white in dark, where the design was tuned for it.
+    public static let cardFill      = dynamic(light: .white,                    dark: rgba(255, 255, 255, 0.03))
+
     // MARK: - Ink (adaptive text)
 
     public static let ink       = dynamic(light: hex(0x1A1A1A),               dark: hex(0xF4F2EE))

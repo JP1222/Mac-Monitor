@@ -158,7 +158,7 @@ public struct PopoverView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(MMTokens.rgba(255, 255, 255, 0.03))
+        .background(MMTokens.cardFill)
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(MMTokens.glassBorder, lineWidth: 1)

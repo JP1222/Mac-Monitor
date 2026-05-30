@@ -14,6 +14,7 @@ import SwiftUI
 public struct RunnerCardView: View {
     public let runner: Runner
     @State private var isHovering = false
+    @Environment(\.colorScheme) private var scheme
 
     public init(runner: Runner) { self.runner = runner }
 
@@ -261,20 +262,23 @@ public struct RunnerCardView: View {
 
     // MARK: - Background
 
+    // Light mode uses an OPAQUE card so the popover's `.thinMaterial` doesn't
+    // bleed through a near-transparent fill (which read as a gray "fog"). Dark
+    // mode keeps the translucent fills the design was tuned for.
+    @ViewBuilder
     private var cardBackground: some View {
-        Group {
-            if runner.state == .building {
+        let dark = scheme == .dark
+        if runner.state == .building {
+            if dark {
                 LinearGradient(
-                    colors: [
-                        MMTokens.rgba(90, 169, 255, 0.10),
-                        MMTokens.rgba(90, 169, 255, 0.02),
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
+                    colors: [MMTokens.rgba(90, 169, 255, 0.10), MMTokens.rgba(90, 169, 255, 0.02)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
                 )
             } else {
-                MMTokens.rgba(255, 255, 255, 0.03)
+                ZStack { Color.white; MMTokens.blue.opacity(0.10) }   // opaque light-blue
             }
+        } else {
+            MMTokens.cardFill
         }
     }
 
