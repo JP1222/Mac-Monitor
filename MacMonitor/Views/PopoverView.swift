@@ -25,12 +25,20 @@ public struct PopoverView: View {
         //     to 0 height inside MenuBarExtra. The cap-rows approach is the
         //     reliable workaround.
         VStack(spacing: 0) {
-            PopoverHeader()
+            PopoverHeader()                          // pinned top
             if viewModel.hasGitHubToken {
                 ErrorBanner()
                     .environmentObject(viewModel)
-                sectionsContent
-                QuickActionsBar()
+                // Scrollable middle, bounded so the popover can't grow past the
+                // screen and squeeze the footer off. `maxHeight` (not
+                // `.fixedSize`/`ViewThatFits`, which collapse here) keeps it
+                // dynamic when content is short and scrolls when it's tall.
+                ScrollView {
+                    sectionsContent
+                }
+                .frame(minHeight: 220, maxHeight: 460)   // minHeight hedges the collapse-to-0 bug
+                Divider().overlay(MMTokens.glassDivider)
+                QuickActionsBar()                    // pinned bottom — always visible
                     .environmentObject(viewModel)
             } else {
                 OnboardingView()

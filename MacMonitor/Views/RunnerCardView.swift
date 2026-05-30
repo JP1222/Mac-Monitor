@@ -275,7 +275,13 @@ public struct RunnerCardView: View {
                     startPoint: .topLeading, endPoint: .bottomTrailing
                 )
             } else {
-                ZStack { Color.white; MMTokens.blue.opacity(0.10) }   // opaque light-blue
+                // Opaque light-blue with a touch of gradient — a flat low-alpha
+                // blue over white desaturates into gray, so we push it up.
+                ZStack {
+                    Color.white
+                    LinearGradient(colors: [MMTokens.blue.opacity(0.18), MMTokens.blue.opacity(0.07)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                }
             }
         } else {
             MMTokens.cardFill
