@@ -25,19 +25,41 @@ SwiftUI menu bar app + WidgetKit + Swift daemon. Developed primarily by AI agent
 # App build via CLI
 xcodebuild -scheme MacMonitor -configuration Debug build
 
-# Agent release build
-cd MacMonitorAgent && swift build -c release
+# Agent — LOCAL Mac: bundled in the app, auto-registered via SMAppService
+# (AgentInstaller). Just build + run the app; no manual install. The agent
+# binary lives at MacMonitor.app/Contents/MacOS/macmonitor-agent, its plist at
+# Contents/Library/LaunchAgents/. The app is NOT sandboxed for this to work
+# (macOS blocks a sandboxed app from registering a non-sandboxed helper).
 
-# (Re)install agent LaunchAgent
-cp launchd/com.jp1222.macmonitor-agent.plist ~/Library/LaunchAgents/
+# Agent — REMOTE build-farm Macs: standalone (the app can't install on them)
+cd MacMonitorAgent && swift build -c release
+sudo cp .build/release/macmonitor-agent /usr/local/bin/
+cp launchd/com.jp1222.macmonitor-agent.plist ~/Library/LaunchAgents/   # absolute-path variant
 launchctl bootout gui/$(id -u)/com.jp1222.macmonitor-agent 2>/dev/null || true
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jp1222.macmonitor-agent.plist
 
-# Agent logs
+# Agent logs (remote variant only — the bundled one omits Std*Path; see below)
 tail -f /tmp/macmonitor-agent.{out,err}.log
 ```
 
 GUI iteration: open `MacMonitor.xcodeproj`, ⌘R the `MacMonitor` scheme.
+
+### Rebuilding the bundled agent (SMAppService) — three non-obvious gotchas
+The bundled-agent path is finicky to sign; all three of these are verified and
+each produces a confusing `register()` failure:
+1. **DerivedData must live OUTSIDE the git worktree.** Inside `.claude/worktrees/…`
+   the linked binaries inherit the `com.apple.provenance` xattr → codesign fails
+   `"resource fork, Finder information, or similar detritus not allowed"`. Use the
+   default `~/Library/Developer/Xcode/DerivedData`, or `xattr -cr` the bundle.
+2. **Clean build (`xcodebuild clean build`), not incremental.** Incremental leaves
+   the embedded plist/helper signature stale → `SMAppServiceErrorDomain code 3,
+   "Codesigning failure loading plist" (-67054)`.
+3. **`MacMonitorAgent/launchd/agent-bundle.plist` must NOT set `Standard{Out,Error}Path`.**
+   macOS 14.4+ rejects them for an app-registered job → `code 22 "Invalid argument"`.
+   (The /usr/local/bin remote variant keeps them — it's not SMAppService-registered.)
+Debug tip: this app's os_log isn't readable via `log show` from a headless shell;
+write the `register()` NSError to the App Group container to see it. `sfltool dumpbtm`
+(no sudo) shows the Login Items / BTM state.
 
 ## SwiftUI / WidgetKit / macOS pitfalls (verified)
 

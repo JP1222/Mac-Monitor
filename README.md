@@ -113,6 +113,16 @@ released to subprocesses without your fingerprint.
 
 ### Installing the agent
 
+**Local Mac — automatic.** The app ships the agent inside its bundle
+(`Contents/MacOS/macmonitor-agent`) and registers it as a LaunchAgent via
+`SMAppService` on first launch (`AgentInstaller`). Nothing to install — just run
+the app, then `curl http://127.0.0.1:8765/health` to verify. (This is why the
+app is **not** sandboxed: macOS forbids a sandboxed app from registering a
+non-sandboxed helper, and the agent must be non-sandboxed to drive docker.)
+
+**Remote Macs — standalone.** The app can't install software on another machine,
+so build & install the agent there by hand (same single binary):
+
 ```sh
 cd MacMonitorAgent
 swift build -c release
@@ -123,9 +133,8 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jp1222.macmonitor-ag
 curl http://127.0.0.1:8765/health   # verify
 ```
 
-To monitor multiple Macs, repeat on each one and add their hostnames as
-`Device` entries (UI for this is forthcoming; for now edit
-`DashboardSnapshot+Mock.swift`'s default devices array).
+Then add each remote Mac in Settings as a `label@host` device endpoint (host can
+be a Tailscale IP). The app polls `http://<host>:8765/health` on each.
 
 ## Architecture
 

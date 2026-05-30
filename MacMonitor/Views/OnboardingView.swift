@@ -56,7 +56,7 @@ public struct OnboardingView: View {
             .padding(.horizontal, 4)
 
             // Footer note
-            Text("Storage section also needs the local agent — see README.md for the launchctl one-liner.")
+            Text("The local health agent installs itself on first launch (Storage section). Remote Macs need it installed separately — see README.md.")
                 .font(MMFont.rounded(size: 10.5))
                 .foregroundStyle(MMTokens.inkFaint)
                 .multilineTextAlignment(.center)

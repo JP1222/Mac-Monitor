@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SMAppService variant — bundled INSIDE MacMonitor.app.
+
+  A build phase copies this file to
+    MacMonitor.app/Contents/Library/LaunchAgents/com.jp1222.macmonitor-agent.plist
+  and AgentInstaller registers it via SMAppService.agent(plistName:).
+
+  Uses `BundleProgram` (a path RELATIVE TO THE .app ROOT) instead of an
+  absolute ProgramArguments path: that's what lets launchd verify the helper's
+  code signature belongs to the host app. Do NOT change it to an absolute path.
+
+  This is LOCAL-machine only. Remote build-farm Macs run the standalone
+  /usr/local/bin install — see ./com.jp1222.macmonitor-agent.plist.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jp1222.macmonitor-agent</string>
+
+    <key>BundleProgram</key>
+    <string>Contents/MacOS/macmonitor-agent</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MM_AGENT_PORT</key>
+        <string>8765</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- NOTE: StandardOutPath/StandardErrorPath are intentionally OMITTED.
+         macOS 14.4+ rejects an SMAppService job that sets them when the host
+         app is sandboxed (register() → SMAppServiceErrorDomain code 22 /
+         status .notFound). The standalone /usr/local/bin variant keeps them. -->
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
