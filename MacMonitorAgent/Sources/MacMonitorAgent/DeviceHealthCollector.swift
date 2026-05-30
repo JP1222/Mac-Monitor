@@ -13,7 +13,9 @@
 //   - uptime:      sysctl kern.boottime
 //   - OrbStack:    pgrep "OrbStack Helper" (running if any pids returned)
 //   - Docker:      `docker ps -q | wc -l`
-//   - BuildKit:    `du -sk ~/.docker/buildx` (cached layer storage)
+//   - BuildKit:    `du -sk ~/buildx-cache` (the CI's `type=local` cache —
+//                  the store that actually grows build-to-build). Falls back
+//                  to `docker system df` Build Cache when that dir is absent.
 //
 // Each shell-out has a fast-fail timeout (2s). If a tool isn't installed
 // (no Docker, no OrbStack) we just report zero / false — the agent never
@@ -139,25 +141,59 @@ enum DeviceHealthCollector {
             out.append(diskFolder(path: orbStackPath, layer: .orbStackVM, label: "OrbStack VM", sub: "linux arm64"))
         }
 
-        // BuildKit cache — `docker system df` is the authoritative source.
-        // For Docker Desktop the actual cache lives INSIDE the Docker VM,
-        // not on the host fs, so host-side du gives garbage. Falls back to
-        // the buildx host dir only if docker isn't reachable.
-        if let cache = buildKitCacheViaDockerDF() {
+        // BuildKit cache — measure the CI's `type=local` cache at
+        // ~/buildx-cache (the workflow's `cache-to: type=local,dest=
+        // $HOME/buildx-cache/<app>`). That's a content-addressed file store
+        // that actually grows build-to-build and is the thing worth watching
+        // for "time to prune". It is NOT visible to `docker system df`, which
+        // only reports the daemon's internal buildkit cache (the `docker`
+        // driver) — not the type=local export, and not a transient
+        // docker-container builder's volume. So `du` the dir directly. Fall
+        // back to `docker system df` only when ~/buildx-cache is absent (e.g.
+        // a Mac that caches via the GHA/registry exporter instead).
+        let localBuildxCache = "\(NSHomeDirectory())/buildx-cache"
+        if FileManager.default.fileExists(atPath: localBuildxCache) {
+            out.append(buildKitCacheViaLocalDir(path: localBuildxCache))
+        } else if let cache = buildKitCacheViaDockerDF() {
             out.append(cache)
-        } else {
-            let buildxCache = "\(NSHomeDirectory())/.docker/buildx"
-            if FileManager.default.fileExists(atPath: buildxCache) {
-                out.append(diskFolder(path: buildxCache, layer: .buildKitCache, label: "BuildKit cache", sub: "docker buildx (metadata)"))
-            }
         }
         return out
     }
 
+    /// Measure the `type=local` buildx cache dir (`~/buildx-cache`, summed
+    /// across its per-app subdirs) via `du -sk`. This is the cache the build
+    /// workflow writes with `cache-to: type=local` — a content-addressed file
+    /// store, invisible to `docker system df`, that actually grows build-to-
+    /// build (snapshot: ~12GB across 6 apps, capped per-app at 8GB by the
+    /// workflow's prune step). Denominator fixed at 30GB to match the "cache
+    /// pressure" meter: past 30GB the bar clamps to 100% and tone goes
+    /// critical → a clear "time to prune" signal.
+    private static func buildKitCacheViaLocalDir(path: String) -> DiskUsage {
+        // `du -sk` is stat-only (no file reads), but a multi-GB cache has many
+        // small blob files — give it 6s (vs the 3s default) so a busy disk
+        // can't truncate it to 0. Mutually exclusive with the docker df
+        // fallback (the caller picks exactly one), so this never stacks toward
+        // /health's 12s ceiling. Tiny stdout ("<kb>\t<path>") → post-exit drain
+        // is safe (no 64KB-pipe deadlock risk).
+        let result = runShell("/usr/bin/du", args: ["-sk", path], timeout: 6)
+        let kb = Int64(result.stdout.split(separator: "\t").first?.trimmingCharacters(in: .whitespaces) ?? "0") ?? 0
+        let used = kb * 1024
+        let denominator: Int64 = 30_000_000_000   // 30 GB design threshold
+        return DiskUsage(
+            layer: .buildKitCache,
+            label: "BuildKit cache",
+            sub: "~/buildx-cache",
+            usedBytes: used,
+            totalBytes: max(used, denominator),
+            state: tone(for: used, total: denominator)
+        )
+    }
+
     /// Parse `docker system df` and return the Build Cache row as a
-    /// DiskUsage. The denominator is fixed at 30GB to match the design's
-    /// "cache pressure" semantics — when cache > 30GB the meter shows
-    /// 100% (clamped) and the user gets a clear "time to prune" signal.
+    /// DiskUsage. Fallback for Macs with no ~/buildx-cache (e.g. caching via
+    /// the GHA/registry exporter). The denominator is fixed at 30GB to match
+    /// the design's "cache pressure" semantics — when cache > 30GB the meter
+    /// shows 100% (clamped) and the user gets a clear "time to prune" signal.
     private static func buildKitCacheViaDockerDF() -> DiskUsage? {
         // 6s (vs the 3s default): under launchd / a busy Docker, `docker
         // system df` is slow. Too tight a timeout makes this fail → we fall
