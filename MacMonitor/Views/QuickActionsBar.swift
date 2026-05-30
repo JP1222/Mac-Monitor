@@ -6,6 +6,7 @@
 //   - Prune cache → asks the agent to drop the BuildKit cache (tinted amber)
 
 import SwiftUI
+import AppKit
 
 public struct QuickActionsBar: View {
     @EnvironmentObject private var viewModel: DashboardViewModel
@@ -21,11 +22,26 @@ public struct QuickActionsBar: View {
                 disabled: false
             ) {
                 if let url = viewModel.snapshot.repositories.first?.actionsURL {
-                    #if canImport(AppKit)
                     NSWorkspace.shared.open(url)
-                    #endif
                 }
             }
+
+            // Quit — a menu-bar (`.accessory`) app has no app menu, so this is
+            // the user's way out. ⌘Q works while the popover is focused.
+            Button { NSApp.terminate(nil) } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "power").font(.system(size: 11, weight: .medium))
+                    Text("Quit").font(MMFont.rounded(size: 11.5, weight: .semibold)).kerning(-0.1)
+                }
+                .foregroundStyle(MMTokens.inkMuted)
+                .frame(height: 30)
+                .padding(.horizontal, 13)
+                .background(MMTokens.cardFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(MMTokens.glassBorder, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut("q", modifiers: .command)
+            .help("Quit Mac Monitor")
             // Restart / Prune buttons intentionally removed: they act on the
             // LOCAL agent's runner LaunchAgents, but this setup runs runners on
             // a remote machine and schedules them externally — so the buttons
