@@ -166,7 +166,13 @@ public struct RunnerCardView: View {
                 // non-nil avg of 0 would otherwise show "over Xs" from t=0).
                 let validAvg: Int? = (job.historicalAvgSeconds ?? 0) > 0 ? job.historicalAvgSeconds : nil
                 let livePct: Double = {
-                    guard let validAvg else { return 0.5 }
+                    // Best signal first: a fan-out matrix build reports exact
+                    // job-completion progress — correct even as its job count
+                    // varies run to run. Else a stable single job with history
+                    // gets the time estimate (elapsed/avg); else the running
+                    // job's real step fraction; else a 50% flatline.
+                    if let matrix = job.matrixProgress { return matrix }
+                    guard let validAvg else { return job.stepProgress ?? 0.5 }
                     return min(0.95, max(0.02, Double(elapsed) / Double(validAvg)))
                 }()
                 // Signed: >= 0 remaining, < 0 overrun.

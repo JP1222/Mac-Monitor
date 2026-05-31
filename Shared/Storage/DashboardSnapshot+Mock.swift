@@ -95,7 +95,10 @@ extension DashboardSnapshot {
             startedAt: now.addingTimeInterval(-134),
             etaSeconds: 48,
             runID: 7_812_300_001,
-            runURL: URL(string: "https://github.com/JP1222/yolo-rollo/actions/runs/7812300001")!
+            runURL: URL(string: "https://github.com/JP1222/yolo-rollo/actions/runs/7812300001")!,
+            // Fan-out matrix: 4 of 7 app builds finished → matrixProgress ≈ 57%.
+            runJobsTotal: 7,
+            runJobsCompleted: 4
         )
 
         let runners: [Runner] = [
