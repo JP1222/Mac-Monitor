@@ -224,19 +224,26 @@ public struct RunnerCardView: View {
     // MARK: - Building placeholder (BUILDING chip but no job metadata yet)
 
     private var buildingPlaceholderBody: some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-                .scaleEffect(0.7)
-                .tint(MMTokens.blue)
-            Text("Job starting…")
-                .font(MMFont.rounded(size: 11.5))
-                .foregroundStyle(MMTokens.inkMuted)
-            Spacer()
-            if let last = runner.lastJob {
-                Text("last · \(formatElapsed(last.durationSeconds))")
-                    .font(MMFont.mono(size: 10.5))
-                    .foregroundStyle(MMTokens.inkSoft)
+        // Busy runner, no job metadata yet — the few-second gap between the
+        // runner going busy and GitHub's /jobs surfacing the new job +
+        // runner_name. Keep an indeterminate bar so the card reads as actively
+        // building instead of collapsing to a thin line and flickering each
+        // time one runner picks up the next job in a sequential run.
+        VStack(alignment: .leading, spacing: 5) {
+            ProgressBarView(value: 0, tone: MMTokens.blue, indeterminate: true)
+            HStack(spacing: 6) {
+                // "Building next…" once this runner has already finished a job
+                // this session (it's mid-run, churning jobs); "Job starting…"
+                // only on a cold first pickup.
+                Text(runner.lastJob != nil ? "Building next…" : "Job starting…")
+                    .font(MMFont.rounded(size: 11))
+                    .foregroundStyle(MMTokens.inkMuted)
+                Spacer()
+                if let last = runner.lastJob {
+                    Text("last · \(formatElapsed(last.durationSeconds))")
+                        .font(MMFont.mono(size: 10.5))
+                        .foregroundStyle(MMTokens.inkSoft)
+                }
             }
         }
     }
