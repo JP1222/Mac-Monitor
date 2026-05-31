@@ -47,7 +47,10 @@ public struct RunnerCardView: View {
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
-        .disabled(!hasClickableTarget)
+        // NOT `.disabled()` for idle cards — SwiftUI dims a disabled button
+        // (the gray "fog"). The action already no-ops when there's no run URL,
+        // and the hover highlight is gated on `hasClickableTarget`, so leaving
+        // it enabled changes nothing but the (wrong) dimmed appearance.
         .onHover { isHovering = $0 }
         .help(currentRunURL?.absoluteString ?? "")
     }
