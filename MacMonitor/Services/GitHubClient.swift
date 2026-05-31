@@ -191,11 +191,24 @@ public struct GitHubClient: GitHubClienting {
             for run in runs {
                 group.addTask {
                     do {
-                        let req = try endpoint("/repos/\(repository.slug)/actions/runs/\(run.id)/jobs")
+                        // per_page=100 so a wide fan-out matrix isn't truncated
+                        // at the default 30 — we need the full job list to count
+                        // completion accurately.
+                        let req = try endpoint(
+                            "/repos/\(repository.slug)/actions/runs/\(run.id)/jobs",
+                            queryItems: [URLQueryItem(name: "per_page", value: "100")]
+                        )
                         let payload = try await decode(APIJobsResponse.self, from: req)
+                        // Run-level fan-out counts for matrixProgress. total_count
+                        // is authoritative for the denominator; completed is taken
+                        // from the page (≤100 jobs covers our matrices).
+                        let totalJobs = payload.total_count ?? payload.jobs.count
+                        let completedJobs = payload.jobs.filter { $0.status == "completed" }.count
                         return payload.jobs
                             .filter { $0.status == "in_progress" }
-                            .map { $0.toDomain(run: run, repository: repository) }
+                            .map { $0.toDomain(run: run, repository: repository,
+                                               runJobsTotal: totalJobs,
+                                               runJobsCompleted: completedJobs) }
                     } catch {
                         return []
                     }
@@ -306,7 +319,7 @@ public struct GitHubClient: GitHubClienting {
 /// Wrapper struct because GitHub returns `{ "total_count": N, "runners": [...] }`.
 private struct APIRunnersResponse: Decodable { let runners: [APIRunner] }
 private struct APIRunsResponse:    Decodable { let workflow_runs: [APIWorkflowRun] }
-private struct APIJobsResponse:    Decodable { let jobs: [APIWorkflowJob] }
+private struct APIJobsResponse:    Decodable { let total_count: Int?; let jobs: [APIWorkflowJob] }
 
 private struct APIRunner: Decodable {
     let id: Int
@@ -460,7 +473,12 @@ private struct APIWorkflowJob: Decodable {
         ghJobResult(status: status, conclusion: conclusion)
     }
 
-    func toDomain(run: APIWorkflowRun, repository: Repository) -> WorkflowJob {
+    func toDomain(
+        run: APIWorkflowRun,
+        repository: Repository,
+        runJobsTotal: Int? = nil,
+        runJobsCompleted: Int? = nil
+    ) -> WorkflowJob {
         // GitHub doesn't report a real "% complete" — we report 0.5 as a
         // conservative placeholder. ViewModel re-derives a real % from
         // historical avg duration if available.
@@ -481,7 +499,9 @@ private struct APIWorkflowJob: Decodable {
             runnerName: runner_name,
             // Sort by step number so the timeline renders in execution order
             // regardless of array order GitHub returns.
-            steps: steps?.map { $0.toDomain() }.sorted { $0.number < $1.number }
+            steps: steps?.map { $0.toDomain() }.sorted { $0.number < $1.number },
+            runJobsTotal: runJobsTotal,
+            runJobsCompleted: runJobsCompleted
         )
     }
 }

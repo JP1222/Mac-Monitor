@@ -106,6 +106,17 @@ public struct WorkflowJob: Codable, Identifiable, Hashable, Sendable {
     /// older persisted snapshots (no `steps` key) still decode, and so the
     /// queued/cloud paths that don't carry steps stay valid.
     public var steps: [WorkflowStep]?
+    /// Fan-out context for matrix builds — a run whose `Detect changed apps`
+    /// job dispatches one build job per changed app, so the job count varies
+    /// run to run (2 when one app changed, 7+ when everything did). These hold
+    /// the parent run's total job count and how many have finished, captured
+    /// from the run's full `/jobs` payload at fetch time. Optional + nil so
+    /// older snapshots, single-job workflows, and cloud jobs still decode.
+    /// They feed `matrixProgress`, the only progress signal that stays correct
+    /// when the fan-out width changes between runs (time- and step-based
+    /// estimates can't — see `matrixProgress`).
+    public var runJobsTotal: Int?
+    public var runJobsCompleted: Int?
 
     public init(
         id: String,
@@ -123,7 +134,9 @@ public struct WorkflowJob: Codable, Identifiable, Hashable, Sendable {
         runID: Int,
         runURL: URL,
         runnerName: String? = nil,
-        steps: [WorkflowStep]? = nil
+        steps: [WorkflowStep]? = nil,
+        runJobsTotal: Int? = nil,
+        runJobsCompleted: Int? = nil
     ) {
         self.id = id
         self.workflow = workflow
@@ -141,6 +154,8 @@ public struct WorkflowJob: Codable, Identifiable, Hashable, Sendable {
         self.runURL = runURL
         self.runnerName = runnerName
         self.steps = steps
+        self.runJobsTotal = runJobsTotal
+        self.runJobsCompleted = runJobsCompleted
     }
 
     public func elapsedSeconds(now: Date = Date()) -> Int {
@@ -153,7 +168,13 @@ public struct WorkflowJob: Codable, Identifiable, Hashable, Sendable {
     /// Capped at 0.95 so the bar never reads 100% before the build actually
     /// finishes (which would feel like a lie when ETA blows past).
     public func estimatedProgress(historicalAvgSeconds: Int?, now: Date = Date()) -> Double {
-        guard let avg = historicalAvgSeconds, avg > 0 else { return 0.5 }
+        // Fallback ladder, best signal first:
+        //  1. fan-out matrix → exact job-completion (survives a varying job count)
+        //  2. stable single job with history → time estimate elapsed/avg
+        //  3. real step-completion of the running job
+        //  4. 50% flatline (no steps, no history)
+        if let m = matrixProgress { return m }
+        guard let avg = historicalAvgSeconds, avg > 0 else { return stepProgress ?? 0.5 }
         let elapsed = elapsedSeconds(now: now)
         return min(0.95, max(0.02, Double(elapsed) / Double(avg)))
     }
@@ -163,5 +184,51 @@ public struct WorkflowJob: Codable, Identifiable, Hashable, Sendable {
     public func estimatedEtaSeconds(historicalAvgSeconds: Int?, now: Date = Date()) -> Int? {
         guard let avg = historicalAvgSeconds, avg > 0 else { return nil }
         return max(0, avg - elapsedSeconds(now: now))
+    }
+
+    /// Fallback progress for an in-progress job that has **no historical
+    /// average** to estimate against — a brand-new or rarely-succeeding
+    /// workflow (e.g. a Docker image build that runs far less often than CI,
+    /// so its one success never survives the 10-run `recent` window the
+    /// average is drawn from). Instead of flatlining at 50%, derive a *real*
+    /// fraction from the job's live `steps[]`: GitHub reports each step's
+    /// status, so completed-vs-total is genuine, monotonic, and always
+    /// available for a running job — no extra API call.
+    ///
+    /// Returns nil when there are no steps to measure (queued/cloud jobs that
+    /// carry no `steps`), so callers can chain a clean fallback ladder:
+    ///   `historicalEstimate ?? stepProgress ?? 0.5`
+    public var stepProgress: Double? {
+        guard let steps, !steps.isEmpty else { return nil }
+        // Completed steps count fully; the single in-progress step gets half
+        // credit so the bar advances mid-step rather than freezing — the
+        // "Build & push" step alone can run for minutes. Capped below 1.0 so
+        // a job never reads 100% while its final "Complete job" / "Post …"
+        // steps are still wrapping up.
+        let total = Double(steps.count)
+        let completed = Double(steps.filter { $0.status == .completed }.count)
+        let inFlight = steps.contains { $0.status == .inProgress } ? 0.5 : 0
+        return min(0.95, (completed + inFlight) / total)
+    }
+
+    /// Build progress for a fan-out matrix run, measured over the WHOLE matrix
+    /// instead of one job. A matrix run's `Detect changed apps` job dispatches
+    /// one build per changed app, so both obvious proxies fail:
+    ///   • time-based `elapsed / historicalAvg` — the job count, and therefore
+    ///     duration, changes per run; any average conflates 2-app and 7-app runs.
+    ///   • single-job `stepProgress` — sawtooths, resetting toward 0 each time
+    ///     the runner finishes one app and picks up the next.
+    /// Job-completion is exact regardless of fan-out width:
+    ///   (finished jobs + the running job's step fraction) / total jobs.
+    /// Returns nil for non-matrix work (no run counts, or a lone job) so linear
+    /// workflows fall through to the time/step estimates above.
+    public var matrixProgress: Double? {
+        guard let total = runJobsTotal, total > 1 else { return nil }
+        let done = Double(runJobsCompleted ?? 0)
+        // The matched in-progress job is NOT in `done` (it's still running), so
+        // its step fraction is added as the partial next job — no double-count.
+        // nil steps → 0, degrading cleanly to pure done/total.
+        let inFlight = stepProgress ?? 0
+        return min(0.99, (done + inFlight) / Double(total))
     }
 }
