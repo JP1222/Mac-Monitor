@@ -15,6 +15,62 @@ public enum JobResult: String, Codable, Hashable, Sendable {
     case queued
 }
 
+/// One step inside a job, straight from GitHub's `/jobs` response (each job
+/// carries a real `steps[]` array). This is the genuine build progress — real
+/// names, real per-step status, real timing — that replaces the old fixture
+/// log lines and the fabricated 5-phase rail.
+public struct WorkflowStep: Codable, Identifiable, Hashable, Sendable {
+    /// GitHub's step lifecycle. `pending` is the catch-all for any not-yet-run
+    /// value (GitHub may send "pending" before "queued", or omit it).
+    public enum Status: String, Codable, Hashable, Sendable {
+        case queued, inProgress, completed, pending
+    }
+
+    public var id: Int { number }
+    public let number: Int
+    public let name: String
+    public let status: Status
+    /// Only meaningful once `status == .completed`; nil while running/queued.
+    public let conclusion: JobResult?
+    public let startedAt: Date?
+    public let completedAt: Date?
+
+    public init(
+        number: Int,
+        name: String,
+        status: Status,
+        conclusion: JobResult? = nil,
+        startedAt: Date? = nil,
+        completedAt: Date? = nil
+    ) {
+        self.number = number
+        self.name = name
+        self.status = status
+        self.conclusion = conclusion
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+    }
+
+    /// Folds status + conclusion into the shared `JobResult` palette so a step
+    /// renders with the same `ResultGlyph` used in queue/recent rows. An
+    /// in-progress step is `.building` (animated spinner); a completed step with
+    /// no decodable conclusion is treated as `.failure`, never a perpetual spin.
+    public var displayResult: JobResult {
+        switch status {
+        case .completed:        return conclusion ?? .failure
+        case .inProgress:       return .building
+        case .queued, .pending: return .queued
+        }
+    }
+
+    /// Wall-clock seconds for a finished step (both timestamps present).
+    /// In-progress steps return nil — the view ticks `now − startedAt` live.
+    public var durationSeconds: Int? {
+        guard let started = startedAt, let completed = completedAt else { return nil }
+        return max(0, Int(completed.timeIntervalSince(started)))
+    }
+}
+
 public struct WorkflowJob: Codable, Identifiable, Hashable, Sendable {
     /// GitHub's numeric job ID, stringified for stability across encodings.
     public let id: String
@@ -46,6 +102,10 @@ public struct WorkflowJob: Codable, Identifiable, Hashable, Sendable {
     /// Used by DashboardViewModel to stitch the job to its Runner card
     /// by name match.
     public var runnerName: String?
+    /// The job's real step sequence from GitHub. Optional + defaulted nil so
+    /// older persisted snapshots (no `steps` key) still decode, and so the
+    /// queued/cloud paths that don't carry steps stay valid.
+    public var steps: [WorkflowStep]?
 
     public init(
         id: String,
@@ -62,7 +122,8 @@ public struct WorkflowJob: Codable, Identifiable, Hashable, Sendable {
         historicalAvgSeconds: Int? = nil,
         runID: Int,
         runURL: URL,
-        runnerName: String? = nil
+        runnerName: String? = nil,
+        steps: [WorkflowStep]? = nil
     ) {
         self.id = id
         self.workflow = workflow
@@ -79,6 +140,7 @@ public struct WorkflowJob: Codable, Identifiable, Hashable, Sendable {
         self.runID = runID
         self.runURL = runURL
         self.runnerName = runnerName
+        self.steps = steps
     }
 
     public func elapsedSeconds(now: Date = Date()) -> Int {

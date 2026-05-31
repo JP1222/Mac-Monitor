@@ -396,6 +396,29 @@ private func ghJobResult(status: String, conclusion: String?) -> JobResult {
     }
 }
 
+/// GitHub step `status` → our lifecycle enum. Unknown/absent → `.pending`.
+private func ghStepStatus(_ raw: String) -> WorkflowStep.Status {
+    switch raw {
+    case "in_progress": return .inProgress
+    case "completed":   return .completed
+    case "queued":      return .queued
+    default:            return .pending
+    }
+}
+
+/// GitHub step `conclusion` → `JobResult?`. nil/"" means "no verdict yet"
+/// (still running or queued). Anything not explicitly success/cancelled/skipped
+/// (failure, timed_out, neutral, action_required, …) is a failure.
+private func ghStepConclusion(_ conclusion: String?) -> JobResult? {
+    switch conclusion {
+    case "success":        return .success
+    case "cancelled":      return .cancelled
+    case "skipped":        return .skipped
+    case nil, .some(""):   return nil
+    default:               return .failure
+    }
+}
+
 private struct APIWorkflowJob: Decodable {
     let id: Int
     let run_id: Int
@@ -408,6 +431,30 @@ private struct APIWorkflowJob: Decodable {
     /// GitHub fills this on jobs that ran on a self-hosted runner. Null for
     /// jobs that ran on cloud runners (or never ran).
     let runner_name: String?
+    /// The job's real step sequence. Present on the `/jobs` response; we used
+    /// to decode the job and throw this away. Optional so a job mid-creation
+    /// (steps not yet populated) still decodes.
+    let steps: [APIStep]?
+
+    struct APIStep: Decodable {
+        let number: Int
+        let name: String
+        let status: String
+        let conclusion: String?
+        let started_at: Date?
+        let completed_at: Date?
+
+        func toDomain() -> WorkflowStep {
+            WorkflowStep(
+                number: number,
+                name: name,
+                status: ghStepStatus(status),
+                conclusion: ghStepConclusion(conclusion),
+                startedAt: started_at,
+                completedAt: completed_at
+            )
+        }
+    }
 
     func toJobResult() -> JobResult {
         ghJobResult(status: status, conclusion: conclusion)
@@ -431,7 +478,10 @@ private struct APIWorkflowJob: Decodable {
             etaSeconds: nil,
             runID: run.id,
             runURL: html_url,
-            runnerName: runner_name
+            runnerName: runner_name,
+            // Sort by step number so the timeline renders in execution order
+            // regardless of array order GitHub returns.
+            steps: steps?.map { $0.toDomain() }.sorted { $0.number < $1.number }
         )
     }
 }

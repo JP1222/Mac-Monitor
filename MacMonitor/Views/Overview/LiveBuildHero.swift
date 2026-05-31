@@ -71,7 +71,7 @@ struct LiveBuildHero: View {
                 // Progress
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .firstTextBaseline) {
-                        Text(job.step ?? "Running…")
+                        Text(currentStepName(job) ?? "Running…")
                             .font(MMFont.rounded(size: 13, weight: .semibold))
                             .foregroundStyle(MMTokens.ink)
                             .lineLimit(1)
@@ -81,7 +81,7 @@ struct LiveBuildHero: View {
                     ProgressBarView(value: progress, tone: MMTokens.blue, height: 8)
                 }
 
-                PhaseRail(progress: progress)
+                BuildStepRail(steps: job.steps ?? [], progressFallback: progress)
             }
             .padding(EdgeInsets(top: 16, leading: 18, bottom: 16, trailing: 18))
             .glassCard(cornerRadius: 14,
@@ -175,6 +175,15 @@ struct LiveBuildHero: View {
     private var dot: some View { Text("·").foregroundStyle(MMTokens.inkFaint) }
     private func hostText(_ r: Runner) -> String { r.labels.contains("arm64") ? "arm64" : (r.labels.first ?? "") }
 
+    /// The real step the build is currently on. Falls back to `job.step` (the
+    /// job name) only when GitHub hasn't surfaced a live step yet.
+    private func currentStepName(_ job: WorkflowJob) -> String? {
+        if let active = job.steps?.first(where: { $0.status == .inProgress }) {
+            return active.name
+        }
+        return job.step
+    }
+
     private func calmTitle(_ r: Runner?) -> String {
         switch r?.state {
         case .idle: return "Idle · \(r?.label ?? "")"
@@ -193,12 +202,71 @@ struct LiveBuildHero: View {
     }
 }
 
-// MARK: - Phase rail
+// MARK: - Step rail
 //
-// GitHub's job API doesn't hand us a clean step list in our model (WorkflowJob
-// carries one `step` string, not the whole sequence), so the rail visualizes a
-// generic five-phase build estimated from `progress`. It's an honest
-// approximation, labeled generically — not a claim about the real step names.
+// Picks the real step rail when GitHub gave us the job's `steps[]`, else falls
+// back to the generic five-phase approximation (e.g. a queued job whose steps
+// haven't populated yet).
+
+private struct BuildStepRail: View {
+    let steps: [WorkflowStep]
+    let progressFallback: Double
+
+    var body: some View {
+        if steps.isEmpty {
+            PhaseRail(progress: progressFallback)
+        } else {
+            RealStepRail(steps: steps)
+        }
+    }
+}
+
+// Real steps, compact: one thin segment per step (scales to a 20-step build,
+// unlike the fixed 5-phase strip), colored by each step's true state, plus an
+// honest "Step N of M" caption pinned to the in-progress step.
+private struct RealStepRail: View {
+    let steps: [WorkflowStep]
+
+    private var activeIndex: Int? { steps.firstIndex { $0.status == .inProgress } }
+    private var doneCount: Int { steps.filter { $0.status == .completed }.count }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 3) {
+                ForEach(steps) { step in
+                    Capsule()
+                        .fill(segmentColor(step))
+                        .frame(height: 5)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            Text(caption)
+                .font(MMFont.rounded(size: 11.5, weight: .semibold))
+                .foregroundStyle(MMTokens.inkMuted)
+                .lineLimit(1)
+        }
+    }
+
+    private var caption: String {
+        if let i = activeIndex { return "Step \(i + 1) of \(steps.count)" }
+        if doneCount == steps.count { return "All \(steps.count) steps complete" }
+        return "\(doneCount) of \(steps.count) steps complete"
+    }
+
+    private func segmentColor(_ step: WorkflowStep) -> Color {
+        switch step.displayResult {
+        case .success:   return MMTokens.mint
+        case .failure:   return MMTokens.tomato
+        case .building:  return MMTokens.blue
+        case .cancelled: return MMTokens.slate
+        case .skipped:   return MMTokens.inkFaint
+        case .queued:    return MMTokens.glassBorder   // adaptive faint = "not yet"
+        }
+    }
+}
+
+// Generic fallback when no real steps are available: a five-phase build
+// estimated from `progress`. Honest approximation, labeled generically.
 
 private struct PhaseRail: View {
     let progress: Double

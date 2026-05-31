@@ -163,11 +163,16 @@ struct OverviewWindow: View {
             FleetStrip(entries: fleet, onSelect: { selectedRunnerID = $0 })
             KpiStrip(metrics: kpis)
             if building {
-                // Active build: the live hero (intrinsic) + the streaming logs
-                // terminal, which fills the remaining height.
+                // Active build: the live hero (intrinsic) + the real step
+                // timeline, which fills the remaining height.
                 LiveBuildHero(runner: hero, onOpenRun: open)
-                LogsPanel(lines: logLines(for: hero), isLive: false, context: logContext(for: hero))
-                    .frame(minHeight: logsMinHeight, maxHeight: logsMinHeight == nil ? .infinity : nil)
+                StepTimelinePanel(
+                    steps: hero?.currentJob?.steps ?? [],
+                    context: buildContext(for: hero),
+                    runURL: hero?.currentJob?.runURL,
+                    onOpenRun: open
+                )
+                .frame(minHeight: logsMinHeight, maxHeight: logsMinHeight == nil ? .infinity : nil)
             } else {
                 // Idle/offline: ONE calm panel that fills the space — no empty
                 // hero stacked on a dark, content-less logs terminal.
@@ -177,12 +182,9 @@ struct OverviewWindow: View {
         }
     }
 
-    // MARK: - Logs wiring (sample until streaming lands)
+    // MARK: - Step timeline wiring
 
-    private func logLines(for hero: Runner?) -> [LogLine] {
-        (hero?.state == .building) ? LogsPanel.sampleLines : []
-    }
-    private func logContext(for hero: Runner?) -> String {
+    private func buildContext(for hero: Runner?) -> String {
         guard let job = hero?.currentJob else { return "" }
         return [job.workflow, job.app].compactMap { $0 }.joined(separator: " · ")
     }
