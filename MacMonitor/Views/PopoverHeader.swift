@@ -42,7 +42,7 @@ public struct PopoverHeader: View {
                 openWindow(id: OverviewWindowID.overview)
                 NSApp.activate(ignoringOtherApps: true)
             }
-            iconButton(systemName: "arrow.clockwise", help: "Refresh") {
+            iconButton(systemName: "arrow.clockwise", help: "Refresh", spinning: viewModel.isRefreshing) {
                 Task { await viewModel.refresh() }
             }
             iconButton(systemName: "gearshape", help: "Settings") {
@@ -70,15 +70,93 @@ public struct PopoverHeader: View {
     }
 
     @ViewBuilder
-    private func iconButton(systemName: String, help: String, action: @escaping () -> Void) -> some View {
+    private func iconButton(
+        systemName: String,
+        help: String,
+        spinning: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        HeaderIconButton(systemName: systemName, help: help, spinning: spinning, action: action)
+    }
+}
+
+/// A 24×24 icon button for the popover header. `.plain` drops every native
+/// feedback layer on the floor, so this view rebuilds the three that matter:
+///   • hover  — background brightens when the pointer is over it
+///   • press  — scales down + brightens further (only a `ButtonStyle` can see
+///              `configuration.isPressed`, so the press layer lives there)
+///   • work   — when `spinning` is true the glyph rotates continuously, so the
+///              refresh icon reflects the in-flight fetch, not just the tap
+private struct HeaderIconButton: View {
+    let systemName: String
+    let help: String
+    var spinning: Bool = false
+    let action: () -> Void
+
+    @State private var isHovering = false
+    @State private var angle: Double = 0
+
+    var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(MMTokens.inkMuted)
-                .frame(width: 24, height: 24)
-                .background(MMTokens.rgba(255, 255, 255, 0.06), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .rotationEffect(.degrees(angle))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(HeaderIconButtonStyle(isHovering: isHovering))
+        .onHover { isHovering = $0 }
         .help(help)
+        .onChange(of: spinning) { _, now in
+            if now {
+                // Canonical bug-free continuous spin: animate a monotonically
+                // increasing angle with `.repeatForever`. Each cycle adds 360°
+                // so it never visibly resets while turning.
+                withAnimation(.linear(duration: 0.7).repeatForever(autoreverses: false)) {
+                    angle += 360
+                }
+            } else {
+                // Stopping a `repeatForever` is the tricky half: the infinite
+                // animation keeps "owning" `angle`, so a plain assignment won't
+                // settle it. Mutating inside an animations-disabled transaction
+                // detaches the repeat and snaps the glyph back to rest.
+                var t = Transaction()
+                t.disablesAnimations = true
+                withTransaction(t) { angle = 0 }
+            }
+        }
+    }
+}
+
+/// Press feedback for the header icon buttons. A `ButtonStyle` is the only
+/// place SwiftUI exposes the pressed phase (`configuration.isPressed`); hover
+/// is passed in from the owning view since a style can't observe it.
+private struct HeaderIconButtonStyle: ButtonStyle {
+    let isHovering: Bool
+    @Environment(\.colorScheme) private var scheme
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(width: 24, height: 24)
+            .background(
+                fill(pressed: configuration.isPressed),
+                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+            )
+            .scaleEffect(configuration.isPressed ? 0.86 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.12), value: isHovering)
+    }
+
+    /// Three rest/hover/press tiers, each adaptive: a white scrim reads on the
+    /// dark popover, a black scrim on the light one. The old hardcoded
+    /// `rgba(255,255,255,0.06)` was nearly invisible in light mode.
+    private func fill(pressed: Bool) -> Color {
+        let dark = scheme == .dark
+        if pressed {
+            return dark ? MMTokens.rgba(255, 255, 255, 0.16) : MMTokens.rgba(0, 0, 0, 0.14)
+        }
+        if isHovering {
+            return dark ? MMTokens.rgba(255, 255, 255, 0.10) : MMTokens.rgba(0, 0, 0, 0.08)
+        }
+        return dark ? MMTokens.rgba(255, 255, 255, 0.05) : MMTokens.rgba(0, 0, 0, 0.04)
     }
 }
