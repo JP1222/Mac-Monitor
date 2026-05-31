@@ -85,8 +85,9 @@ public struct PopoverHeader: View {
 ///   • hover  — background brightens when the pointer is over it
 ///   • press  — scales down + brightens further (only a `ButtonStyle` can see
 ///              `configuration.isPressed`, so the press layer lives there)
-///   • work   — when `spinning` is true the glyph rotates continuously, so the
-///              refresh icon reflects the in-flight fetch, not just the tap
+///   • work   — when `spinning` is true the glyph is replaced by the system's
+///              own `ProgressView` spinner (the same affordance Mail/Safari use
+///              for reload), so the refresh button reflects the in-flight fetch
 private struct HeaderIconButton: View {
     let systemName: String
     let help: String
@@ -94,36 +95,28 @@ private struct HeaderIconButton: View {
     let action: () -> Void
 
     @State private var isHovering = false
-    @State private var angle: Double = 0
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MMTokens.inkMuted)
-                .rotationEffect(.degrees(angle))
+            if spinning {
+                // Apple's native indeterminate loader — it drives its own
+                // rotation, so we don't hand-roll an angle animation. `.small`
+                // + 0.7 scale matches the "Job starting…" spinner elsewhere and
+                // fits the 24×24 hit target; the tint keeps it ink-muted instead
+                // of jumping to the accent color.
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.7)
+                    .tint(MMTokens.inkMuted)
+            } else {
+                Image(systemName: systemName)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(MMTokens.inkMuted)
+            }
         }
         .buttonStyle(HeaderIconButtonStyle(isHovering: isHovering))
         .onHover { isHovering = $0 }
         .help(help)
-        .onChange(of: spinning) { _, now in
-            if now {
-                // Canonical bug-free continuous spin: animate a monotonically
-                // increasing angle with `.repeatForever`. Each cycle adds 360°
-                // so it never visibly resets while turning.
-                withAnimation(.linear(duration: 0.7).repeatForever(autoreverses: false)) {
-                    angle += 360
-                }
-            } else {
-                // Stopping a `repeatForever` is the tricky half: the infinite
-                // animation keeps "owning" `angle`, so a plain assignment won't
-                // settle it. Mutating inside an animations-disabled transaction
-                // detaches the repeat and snaps the glyph back to rest.
-                var t = Transaction()
-                t.disablesAnimations = true
-                withTransaction(t) { angle = 0 }
-            }
-        }
     }
 }
 
