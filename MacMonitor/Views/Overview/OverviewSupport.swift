@@ -35,10 +35,14 @@ struct VisualEffectBackground: NSViewRepresentable {
 
 // MARK: - Glass card
 
-/// Native elevated card surface: a `Material` base + a top-lit hairline + a soft
-/// drop shadow. This is the single biggest "feels native" change — Materials
-/// render as frosted vibrancy in dark mode, the way macOS sheets/popovers do,
-/// instead of the previous near-invisible translucent fill.
+/// Elevated *content* card: a `Material` base + a top-lit hairline + a soft drop
+/// shadow. Despite the "glass" name this is deliberately NOT macOS 26 Liquid
+/// Glass (`.glassEffect`): Liquid Glass is reserved for the navigation/control
+/// layer floating ABOVE content (toolbar, popover shell, the action buttons),
+/// and Apple's guidance is explicit that content surfaces — these dashboard
+/// tiles — must not be glass, nor may glass sample glass. So the cards stay a
+/// frosted `Material` (dark) / solid fill (light) and read as the content layer
+/// the real glass floats over. Don't "upgrade" this to `glassEffect`.
 struct GlassCardModifier: ViewModifier {
     @Environment(\.colorScheme) private var scheme
     var material: Material = .regularMaterial
