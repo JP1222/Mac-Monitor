@@ -17,7 +17,10 @@ name: MacMonitor
 options:
   bundleIdPrefix: com.jp1222
   deploymentTarget:
-    macOS: "14.0"  # Sonoma — required for desktop widgets + MenuBarExtra.window style
+    macOS: "26.0"  # Tahoe — Liquid Glass (glassEffect, .glass/.glassProminent
+                   # button styles). Building against the 26 SDK also auto-adopts
+                   # glass on the native toolbar / NavigationSplitView sidebar /
+                   # .searchable field in OverviewWindow with no code change.
   developmentLanguage: en
   createIntermediateGroups: true
   generateEmptyDirectories: true
@@ -26,7 +29,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.10"
-    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
     ENABLE_HARDENED_RUNTIME: YES
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: "73W26RY42S"  # JP1222's personal team (843072690@qq.com)
