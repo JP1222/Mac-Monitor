@@ -44,13 +44,14 @@ public struct PopoverView: View {
             }
         }
         .frame(width: 380)
-        .background(popoverBackground)
         .foregroundStyle(MMTokens.ink)
-        .clipShape(RoundedRectangle(cornerRadius: MMTokens.radiusPopover, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: MMTokens.radiusPopover, style: .continuous)
-                .stroke(MMTokens.glassBorder, lineWidth: 1)
-        )
+        // The popover is a panel floating over the desktop — the canonical
+        // Liquid Glass surface (same role as Control Center). `glassEffect`
+        // supplies the material, the rounded clip, AND the lit edge in one, so
+        // the old `.thinMaterial` + token overlay + manual clip + stroke is gone.
+        // Inner cards (RunnerCardView etc.) stay opaque/material — they're
+        // content, and glass must not sample glass.
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: MMTokens.radiusPopover, style: .continuous))
     }
 
     /// The four data sections. Extracted so ViewThatFits can use the same
@@ -172,15 +173,6 @@ public struct PopoverView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    /// Dark glass = system thin material + our token color overlay. The
-    /// material brings the SwiftUI vibrancy effect; the overlay matches the
-    /// 78% alpha tint from shared.jsx (`rgba(28,28,32,0.78)`).
-    private var popoverBackground: some View {
-        ZStack {
-            Rectangle().fill(.thinMaterial)
-            Rectangle().fill(MMTokens.glass)
-        }
-    }
 }
 
 #Preview("Popover") {

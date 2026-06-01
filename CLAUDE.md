@@ -63,6 +63,15 @@ write the `register()` NSError to the App Group container to see it. `sfltool du
 
 ## SwiftUI / WidgetKit / macOS pitfalls (verified)
 
+### Liquid Glass (macOS 26 Tahoe) — glass is the navigation layer only
+- The app deploys to **macOS 26.0** (`project.yml`), so glass APIs need **no `if #available` gating**. Building against the 26 SDK also **auto-adopts** Liquid Glass on the native `.toolbar` / `NavigationSplitView` sidebar / `.searchable` field in `OverviewWindow` — zero code. CI is pinned to `runs-on: macos-26` so it links the 26 SDK. ([Apple — Applying Liquid Glass to custom views](https://developer.apple.com/documentation/swiftui/applying-liquid-glass-to-custom-views))
+- **Glass is for the navigation/control layer floating ABOVE content, never for content itself.** Apple is explicit: don't put glass on lists/cards/media, don't stack glass-on-glass, and **glass cannot sample other glass**. So this project glasses the *shell + controls* and leaves *content* opaque on purpose:
+  - Glass: popover shell (`PopoverView.glassEffect`), header icon buttons + action bar (`.buttonStyle(.glass)` / `.glassProminent`), and the auto-glassed window chrome.
+  - **NOT** glass (deliberate, documented in-code): `GlassCardModifier` fleet/KPI/hero tiles, `OverviewStatusBar`'s `.bar`, the widget background — all content surfaces. Don't "upgrade" these to `glassEffect`.
+- `glassEffect(_:in:)` is **three-in-one** — material + shape clip + lit edge — so it replaces the old `.thinMaterial` + `.clipShape` + `.overlay(stroke)` trio (see the PopoverView diff).
+- **Multiple nearby glass elements → wrap in `GlassEffectContainer`** (shared sampling region; enables blending/morphing). The header's 3 icon buttons and the action bar's 2 buttons each live in one.
+- Buttons: `.buttonStyle(.glass)` / `.glassProminent` supply hover, press (scale + illumination), and vibrant glyphs for free — **don't hand-roll a `ButtonStyle`** for that anymore (deleted ~65 lines of `HeaderIconButtonStyle` doing exactly this).
+
 ### `ScrollView` inside `MenuBarExtra(.window)` shrinks on second open
 - Apply `.fixedSize(horizontal: false, vertical: true)` to the `ScrollView` to pin intrinsic height. ([Apple Forums #741601](https://developer.apple.com/forums/thread/741601))
 - This project uses plain `VStack` + `.prefix(N)` row caps + "+N more" footer instead, because predictable max-height is a feature (popover can't grow unbounded for noisy repos). If you switch back to `ScrollView`, use `fixedSize`.

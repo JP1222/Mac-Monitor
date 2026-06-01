@@ -14,95 +14,43 @@ public struct QuickActionsBar: View {
     public init() {}
 
     public var body: some View {
-        HStack(spacing: 6) {
-            QuickActionButton(
-                systemImage: "chevron.left.forwardslash.chevron.right",
-                label: "Open Actions on GitHub",
-                primary: true,
-                disabled: false
-            ) {
-                if let url = viewModel.snapshot.repositories.first?.actionsURL {
-                    NSWorkspace.shared.open(url)
+        // Both buttons in one container so the prominent action and the Quit
+        // glass pill share a sampling region and blend at their shared edge.
+        GlassEffectContainer(spacing: 6) {
+            HStack(spacing: 6) {
+                // Primary action: prominent (opaque) glass, brand-tinted.
+                Button {
+                    if let url = viewModel.snapshot.repositories.first?.actionsURL {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Label("Open Actions on GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
+                        .font(MMFont.rounded(size: 11.5, weight: .semibold))
+                        .frame(maxWidth: .infinity)
                 }
-            }
+                .buttonStyle(.glassProminent)
+                .tint(MMTokens.brand)
 
-            // Quit — a menu-bar (`.accessory`) app has no app menu, so this is
-            // the user's way out. ⌘Q works while the popover is focused.
-            Button { NSApp.terminate(nil) } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "power").font(.system(size: 11, weight: .medium))
-                    Text("Quit").font(MMFont.rounded(size: 11.5, weight: .semibold)).kerning(-0.1)
+                // Quit — a menu-bar (`.accessory`) app has no app menu, so this is
+                // the user's way out. ⌘Q works while the popover is focused.
+                // Secondary action → translucent `.glass`.
+                Button { NSApp.terminate(nil) } label: {
+                    Label("Quit", systemImage: "power")
+                        .font(MMFont.rounded(size: 11.5, weight: .semibold))
                 }
-                .foregroundStyle(MMTokens.inkMuted)
-                .frame(height: 30)
-                .padding(.horizontal, 13)
-                .background(MMTokens.cardFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(MMTokens.glassBorder, lineWidth: 1))
+                .buttonStyle(.glass)
+                .keyboardShortcut("q", modifiers: .command)
+                .help("Quit Mac Monitor")
+                // Restart / Prune buttons intentionally removed: they act on the
+                // LOCAL agent's runner LaunchAgents, but this setup runs runners on
+                // a remote machine and schedules them externally — so the buttons
+                // could never succeed here and only produced confusing errors.
+                // The agent-side actions + ViewModel methods remain for a future
+                // setup that wants in-app control.
             }
-            .buttonStyle(.plain)
-            .keyboardShortcut("q", modifiers: .command)
-            .help("Quit Mac Monitor")
-            // Restart / Prune buttons intentionally removed: they act on the
-            // LOCAL agent's runner LaunchAgents, but this setup runs runners on
-            // a remote machine and schedules them externally — so the buttons
-            // could never succeed here and only produced confusing errors.
-            // The agent-side actions + ViewModel methods remain for a future
-            // setup that wants in-app control.
         }
+        .controlSize(.large)
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-    }
-}
-
-private struct QuickActionButton: View {
-    let systemImage: String
-    let label: String
-    var tone: Color? = nil
-    var primary: Bool = false
-    var disabled: Bool = false
-    let action: () -> Void
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 11, weight: .medium))
-                Text(label)
-                    .font(MMFont.rounded(size: 11.5, weight: .semibold))
-                    .kerning(-0.1)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 30)
-            .padding(.horizontal, 10)
-            .foregroundStyle(tone ?? MMTokens.ink)
-            .background(buttonBackground)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(MMTokens.glassBorder, lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .opacity(disabled ? 0.5 : 1)
-        }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-    }
-
-    @ViewBuilder
-    private var buttonBackground: some View {
-        if primary {
-            if scheme == .dark {
-                LinearGradient(
-                    colors: [MMTokens.rgba(255, 255, 255, 0.10), MMTokens.rgba(255, 255, 255, 0.03)],
-                    startPoint: .top, endPoint: .bottom
-                )
-            } else {
-                // Opaque light button (white → faint gray) so the popover
-                // material doesn't bleed through as gray fog.
-                LinearGradient(colors: [.white, MMTokens.hex(0xF1F0EC)], startPoint: .top, endPoint: .bottom)
-            }
-        } else {
-            MMTokens.cardFill
-        }
     }
 }
