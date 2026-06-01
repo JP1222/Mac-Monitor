@@ -23,8 +23,12 @@ on:
 
 jobs:
   build:
-    name: Build (macOS-latest)
-    runs-on: macos-latest
+    name: Build (macOS 26 / Xcode 26)
+    # Pinned to macos-26, NOT macos-latest: the app now deploys to macOS 26
+    # (Liquid Glass / glassEffect) and must compile against the macOS 26 SDK.
+    # macos-latest was mid-migration to 26 as of mid-2026 — pinning removes the
+    # timing dependency and guarantees Xcode 26 + the 26 SDK.
+    runs-on: macos-26
 
     steps:
       - name: Checkout
