@@ -6,6 +6,8 @@
 // CPU / Mem / Cache footer fed by the host's live device snapshot. The selected
 // card drives the live-build hero below.
 //
+// Rebuilt on native idioms (system text styles, `Divider`, `ProgressView`,
+// system `accentColor` selection) — no hand-tuned MMFont sizes or hairlines.
 // Layout = `LazyVGrid(.adaptive(minimum: 178))`, the spec's direct mapping of
 // the prototype's `repeat(auto-fit, minmax(178px, 1fr))` grid.
 
@@ -22,18 +24,16 @@ struct FleetStrip: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                SectionCap(text: "Fleet")
+            HStack(spacing: 8) {
+                Text("Fleet").font(.headline)
                 Text("\(onlineCount)/\(entries.count) online · \(buildingCount) building")
-                    .font(MMFont.mono(size: 11))
-                    .foregroundStyle(MMTokens.inkMuted)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
                 Spacer(minLength: 0)
-                HStack(spacing: 4) {
-                    StatusDot(tone: MMTokens.blue, glow: MMTokens.blueGlow, size: 5)
-                    Text("selected drives the hero below")
-                        .font(MMFont.rounded(size: 10.5))
-                        .foregroundStyle(MMTokens.inkSoft)
-                }
+                Text("selected drives the hero below")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
 
             if entries.isEmpty {
@@ -51,14 +51,14 @@ struct FleetStrip: View {
 
     private var emptyState: some View {
         HStack(spacing: 8) {
-            Image(systemName: "cpu").foregroundStyle(MMTokens.inkSoft)
+            Image(systemName: "cpu").foregroundStyle(.secondary)
             Text("No runners registered — check the PAT's Administration:Read scope.")
-                .font(MMFont.rounded(size: 12))
-                .foregroundStyle(MMTokens.inkMuted)
+                .font(.callout)
+                .foregroundStyle(.secondary)
             Spacer()
         }
         .padding(14)
-        .glassCard()
+        .contentCard()
     }
 }
 
@@ -67,19 +67,18 @@ private struct FleetCard: View {
 
     private var runner: Runner { entry.runner }
     private var offline: Bool { runner.status == .offline || runner.state == .offline }
-    private var accent: Color { MMTokens.tone(for: runner.state) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             header
             stateLine
-            Divider().overlay(MMTokens.glassHairline)
+            Divider()
             footerStats
         }
         .padding(EdgeInsets(top: 11, leading: 12, bottom: 11, trailing: 12))
-        .glassCard(cornerRadius: 11,
-                   tint: entry.isSelected ? MMTokens.blue.opacity(0.16) : nil,
-                   strokeColor: entry.isSelected ? MMTokens.blue.opacity(0.45) : nil)
+        .contentCard(cornerRadius: 11,
+                     tint: entry.isSelected ? Color.accentColor.opacity(0.12) : nil,
+                     strokeColor: entry.isSelected ? .accentColor : nil)
         .opacity(offline ? 0.62 : 1)
         .contentShape(Rectangle())
     }
@@ -88,16 +87,16 @@ private struct FleetCard: View {
         HStack(spacing: 7) {
             StatusDot(state: runner.state, size: 7)
             Text(runner.label)
-                .font(MMFont.mono(size: 12, weight: .bold))
-                .foregroundStyle(MMTokens.ink)
+                .font(.system(.callout, design: .monospaced).weight(.semibold))
+                .foregroundStyle(.primary)
                 .lineLimit(1)
             Spacer(minLength: 0)
             if let chip = entry.chip {
                 Text(chip)
-                    .font(MMFont.rounded(size: 9.5, weight: .semibold))
-                    .foregroundStyle(MMTokens.inkSoft)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
                     .padding(.horizontal, 6).padding(.vertical, 1)
-                    .background(MMTokens.rgba(255, 255, 255, 0.06), in: RoundedRectangle(cornerRadius: 5))
+                    .background(.quaternary, in: Capsule())
                     .lineLimit(1)
             }
         }
@@ -107,20 +106,26 @@ private struct FleetCard: View {
     private var stateLine: some View {
         if runner.state == .building, let job = runner.currentJob {
             VStack(alignment: .leading, spacing: 5) {
-                (Text(job.workflow).foregroundStyle(MMTokens.ink).fontWeight(.semibold)
-                 + Text(job.app.map { " · \($0)" } ?? "").foregroundStyle(MMTokens.inkMuted))
-                    .font(MMFont.rounded(size: 11))
-                    .lineLimit(1)
-                ProgressBarView(value: job.progress, tone: MMTokens.blue, height: 4)
+                HStack(spacing: 0) {
+                    Text(job.workflow).foregroundStyle(.primary).fontWeight(.semibold)
+                    if let app = job.app {
+                        Text(" · \(app)").foregroundStyle(.secondary)
+                    }
+                }
+                .font(.callout)
+                .lineLimit(1)
+                ProgressView(value: job.progress)
+                    .tint(.blue)
                 Text("\(Int(job.progress * 100))%\(etaSuffix(job))")
-                    .font(MMFont.mono(size: 10))
-                    .foregroundStyle(MMTokens.inkSoft)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
             }
         } else {
             HStack(spacing: 6) {
                 if offline {
                     Image(systemName: "powerplug").font(.system(size: 11))
-                        .foregroundStyle(MMTokens.inkSoft)
+                        .foregroundStyle(.secondary)
                     Text("Offline · last seen \(runner.heartbeatRelative())")
                 } else {
                     Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
@@ -129,8 +134,8 @@ private struct FleetCard: View {
                 }
                 Spacer(minLength: 0)
             }
-            .font(MMFont.rounded(size: 11))
-            .foregroundStyle(MMTokens.inkMuted)
+            .font(.callout)
+            .foregroundStyle(.secondary)
             .frame(minHeight: 33, alignment: .center)
             .lineLimit(1)
         }
@@ -181,13 +186,13 @@ private struct FleetMiniStat: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(label)
-                .font(MMFont.rounded(size: 9, weight: .bold))
-                .tracking(0.4)
+                .font(.caption2.weight(.semibold))
                 .textCase(.uppercase)
-                .foregroundStyle(MMTokens.inkFaint)
+                .foregroundStyle(.tertiary)
             Text(value)
-                .font(MMFont.mono(size: 11, weight: .semibold))
-                .foregroundStyle(tone ?? MMTokens.inkMuted)
+                .font(.caption.weight(.medium))
+                .monospacedDigit()
+                .foregroundStyle(tone ?? Color.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

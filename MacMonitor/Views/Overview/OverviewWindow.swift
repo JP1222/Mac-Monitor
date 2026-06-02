@@ -69,7 +69,6 @@ struct OverviewWindow: View {
                 systemImage: (nav.section ?? .overview).systemImage,
                 description: Text("This view is coming next — the Overview has the full picture for now.")
             )
-            .background(MMTokens.glassStrong)
         }
     }
 
@@ -79,7 +78,9 @@ struct OverviewWindow: View {
             content(narrow: narrow)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .background(MMTokens.glassStrong)
+        // No hand-painted background — the native NavigationSplitView detail
+        // supplies the window backing so the Tahoe toolbar/sidebar glass samples
+        // the REAL window, not a flat custom fill bleeding through the seam.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             OverviewStatusBar(snapshot: snapshot, narrow: false)
         }
