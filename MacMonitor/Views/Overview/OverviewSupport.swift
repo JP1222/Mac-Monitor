@@ -33,77 +33,49 @@ struct VisualEffectBackground: NSViewRepresentable {
     }
 }
 
-// MARK: - Glass card
+// MARK: - Content card (native surface)
 
-/// Elevated *content* card: a `Material` base + a top-lit hairline + a soft drop
-/// shadow. Despite the "glass" name this is deliberately NOT macOS 26 Liquid
-/// Glass (`.glassEffect`): Liquid Glass is reserved for the navigation/control
-/// layer floating ABOVE content (toolbar, popover shell, the action buttons),
-/// and Apple's guidance is explicit that content surfaces — these dashboard
-/// tiles — must not be glass, nor may glass sample glass. So the cards stay a
-/// frosted `Material` (dark) / solid fill (light) and read as the content layer
-/// the real glass floats over. Don't "upgrade" this to `glassEffect`.
-struct GlassCardModifier: ViewModifier {
-    @Environment(\.colorScheme) private var scheme
-    var material: Material = .regularMaterial
+/// Native macOS content-card surface: a system `controlBackgroundColor` fill, a
+/// hairline in the system `separatorColor`, and continuous corners. NO hand-drawn
+/// top-lit gradient hairline and NO custom drop shadow — those read as a web port
+/// (this UI began as a 1:1 JSX prototype). The system colors instead read as a
+/// native grouped surface, the look of Settings panels and source-list detail
+/// wells. (Glass stays on the floating chrome; content cards like these are
+/// opaque, per Liquid Glass rules — don't "upgrade" this to `glassEffect`.)
+struct ContentCardModifier: ViewModifier {
     var cornerRadius: CGFloat = 12
-    var elevated: Bool = true
-    /// Optional accent tint laid over the surface (used by the live-build hero
-    /// and the selected fleet card).
+    /// Accent wash laid over the fill for a selected / actively-building card.
     var tint: Color? = nil
+    /// Accent stroke for selection; defaults to the system separator hairline.
     var strokeColor: Color? = nil
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        let dark = scheme == .dark
         return content
             .background {
                 ZStack {
-                    // Dark mode: frosted vibrancy reads as elevated glass.
-                    // Light mode: a CRISP SOLID card — the vibrancy material
-                    // fogs over content and washes out accent tints in light,
-                    // which is exactly the "covered / colors paled" symptom.
-                    if dark {
-                        shape.fill(material)
-                    } else {
-                        shape.fill(Color(nsColor: .controlBackgroundColor))
-                    }
+                    shape.fill(Color(nsColor: .controlBackgroundColor))
                     if let tint { shape.fill(tint) }
                 }
             }
             .overlay {
-                if let strokeColor {
-                    shape.strokeBorder(strokeColor, lineWidth: 1)
-                } else {
-                    // Top-lit hairline, polarity flipped per appearance.
-                    shape.strokeBorder(
-                        LinearGradient(
-                            colors: dark
-                                ? [MMTokens.rgba(255, 255, 255, 0.14), MMTokens.rgba(255, 255, 255, 0.04)]
-                                : [MMTokens.rgba(0, 0, 0, 0.10), MMTokens.rgba(0, 0, 0, 0.05)],
-                            startPoint: .top, endPoint: .bottom
-                        ),
-                        lineWidth: 1
-                    )
-                }
+                shape.strokeBorder(
+                    strokeColor ?? Color(nsColor: .separatorColor),
+                    lineWidth: strokeColor == nil ? 1 : 1.5
+                )
             }
             .clipShape(shape)
-            .shadow(color: .black.opacity(elevated ? (dark ? 0.22 : 0.10) : 0),
-                    radius: dark ? 7 : 4, x: 0, y: dark ? 3 : 2)
     }
 }
 
 extension View {
-    /// Native elevated card surface. See `GlassCardModifier`.
-    func glassCard(
-        material: Material = .regularMaterial,
+    /// Native content-card surface. See `ContentCardModifier`.
+    func contentCard(
         cornerRadius: CGFloat = 12,
-        elevated: Bool = true,
         tint: Color? = nil,
         strokeColor: Color? = nil
     ) -> some View {
-        modifier(GlassCardModifier(material: material, cornerRadius: cornerRadius,
-                                   elevated: elevated, tint: tint, strokeColor: strokeColor))
+        modifier(ContentCardModifier(cornerRadius: cornerRadius, tint: tint, strokeColor: strokeColor))
     }
 }
 

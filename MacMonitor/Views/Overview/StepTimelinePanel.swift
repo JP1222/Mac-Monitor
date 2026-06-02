@@ -6,7 +6,7 @@
 // DOES carry a real `steps[]` array, so this shows the genuine build progress:
 // real step names, live status, and per-step durations, refreshed each poll.
 //
-// It's a `.glassCard()` (not a hardcoded dark terminal) so it adapts to the
+// It's a `.contentCard()` (not a hardcoded dark terminal) so it adapts to the
 // system light/dark setting like every other Overview card — the old solid
 // black panel looked broken sitting in the light-mode window.
 
@@ -31,12 +31,11 @@ struct StepTimelinePanel: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider().overlay(MMTokens.glassHairline)
+        GroupBox {
             content
+        } label: {
+            header
         }
-        .glassCard(cornerRadius: 14)
     }
 
     // MARK: - Header
@@ -48,18 +47,18 @@ struct StepTimelinePanel: View {
             } else {
                 StatusDot(tone: MMTokens.slate, glow: MMTokens.rgba(123, 133, 151, 0.18), size: 6)
             }
-            SectionCap(text: "Build steps")
+            Text("Build steps").font(.headline)
             if !context.isEmpty {
                 Text(context)
-                    .font(MMFont.mono(size: 11))
-                    .foregroundStyle(MMTokens.inkSoft)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
             if !steps.isEmpty {
                 Text("\(completedCount)/\(steps.count) done")
-                    .font(MMFont.rounded(size: 11, weight: .semibold))
-                    .foregroundStyle(MMTokens.inkMuted)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
             if let runURL {
@@ -118,19 +117,20 @@ struct StepTimelinePanel: View {
     private func stepRow(_ step: WorkflowStep, now: Date) -> some View {
         HStack(spacing: 10) {
             Text("\(step.number)")
-                .font(MMFont.mono(size: 10.5))
-                .foregroundStyle(MMTokens.inkFaint)
+                .font(.system(.caption2, design: .monospaced))
+                .monospacedDigit()
+                .foregroundStyle(.tertiary)
                 .frame(width: 20, alignment: .trailing)
             ResultGlyph(result: step.displayResult, size: 15)
             Text(step.name)
-                .font(MMFont.rounded(size: 12.5, weight: step.status == .inProgress ? .semibold : .regular))
+                .font(step.status == .inProgress ? .subheadline.weight(.semibold) : .callout)
                 .foregroundStyle(nameColor(step))
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 8)
             Text(durationText(step, now: now))
-                .font(MMFont.mono(size: 11))
-                .foregroundStyle(step.status == .inProgress ? MMTokens.blue : MMTokens.inkFaint)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(step.status == .inProgress ? AnyShapeStyle(MMTokens.blue) : AnyShapeStyle(.tertiary))
                 .monospacedDigit()
         }
         .padding(.horizontal, 14)
@@ -138,11 +138,11 @@ struct StepTimelinePanel: View {
         .background(step.status == .inProgress ? MMTokens.blue.opacity(0.07) : .clear)
     }
 
-    private func nameColor(_ step: WorkflowStep) -> Color {
+    private func nameColor(_ step: WorkflowStep) -> AnyShapeStyle {
         switch step.status {
-        case .inProgress:       return MMTokens.ink
-        case .completed:        return step.conclusion == .skipped ? MMTokens.inkSoft : MMTokens.inkMuted
-        case .queued, .pending: return MMTokens.inkSoft
+        case .inProgress:       return AnyShapeStyle(.primary)
+        case .completed:        return step.conclusion == .skipped ? AnyShapeStyle(.secondary) : AnyShapeStyle(.secondary)
+        case .queued, .pending: return AnyShapeStyle(.secondary)
         }
     }
 

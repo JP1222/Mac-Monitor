@@ -14,7 +14,7 @@ struct ActivityTimeline: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                SectionCap(text: "24h activity")
+                Text("24h activity").font(.headline)
                 Spacer(minLength: 0)
                 legend
             }
@@ -43,7 +43,7 @@ struct ActivityTimeline: View {
             .padding(.top, 6)
         }
         .padding(EdgeInsets(top: 14, leading: 16, bottom: 12, trailing: 16))
-        .glassCard()
+        .contentCard()
     }
 
     private var legend: some View {

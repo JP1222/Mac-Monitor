@@ -37,12 +37,12 @@ struct LiveBuildHero: View {
                 HStack(spacing: 10) {
                     StatusDot(tone: MMTokens.blue, glow: MMTokens.blueGlow, pulse: true, size: 9)
                     Text("Building · \(runner.label)")
-                        .font(MMFont.rounded(size: 10.5, weight: .heavy))
+                        .font(.caption2.weight(.semibold))
                         .tracking(0.9).textCase(.uppercase)
                         .foregroundStyle(MMTokens.blue)
                     Text(hostText(runner))
-                        .font(MMFont.mono(size: 11))
-                        .foregroundStyle(MMTokens.inkFaint)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.tertiary)
                     Spacer(minLength: 0)
                     Button { onOpenRun(job.runURL) } label: {
                         Label("Open run", systemImage: "arrow.up.forward")
@@ -56,13 +56,12 @@ struct LiveBuildHero: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text(job.workflow)
-                            .font(.system(size: 22, weight: .heavy, design: .rounded))
-                            .kerning(-0.4)
-                            .foregroundStyle(MMTokens.ink)
+                            .font(.title2.weight(.bold))
+                            .foregroundStyle(.primary)
                         if let app = job.app {
                             Text("· \(app)")
-                                .font(MMFont.mono(size: 14))
-                                .foregroundStyle(MMTokens.inkMuted)
+                                .font(.system(.callout, design: .monospaced))
+                                .foregroundStyle(.secondary)
                         }
                     }
                     metaRow(job)
@@ -72,19 +71,20 @@ struct LiveBuildHero: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(currentStepName(job) ?? "Running…")
-                            .font(MMFont.rounded(size: 13, weight: .semibold))
-                            .foregroundStyle(MMTokens.ink)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
                             .lineLimit(1)
                         Spacer(minLength: 8)
                         progressLabel(progress: progress, elapsed: elapsed, eta: eta)
                     }
-                    ProgressBarView(value: progress, tone: MMTokens.blue, height: 8)
+                    ProgressView(value: progress)
+                        .tint(.blue)
                 }
 
                 BuildStepRail(steps: job.steps ?? [], progressFallback: progress)
             }
             .padding(EdgeInsets(top: 16, leading: 18, bottom: 16, trailing: 18))
-            .glassCard(cornerRadius: 14,
+            .contentCard(cornerRadius: 14,
                        tint: MMTokens.blue.opacity(0.12),
                        strokeColor: MMTokens.blue.opacity(0.40))
         }
@@ -92,73 +92,59 @@ struct LiveBuildHero: View {
 
     private func metaRow(_ job: WorkflowJob) -> some View {
         HStack(spacing: 10) {
-            Label { Text(job.branch).mmMono(size: 12) } icon: {
+            Label { Text(job.branch).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary) } icon: {
                 Image(systemName: "arrow.triangle.branch").font(.system(size: 11))
             }
             if let pr = job.pullRequest {
                 dot
                 Image(systemName: "arrow.triangle.pull").font(.system(size: 11))
-                Text("#\(pr)").mmMono(size: 12)
+                Text("#\(pr)").font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
             }
             dot
-            Text(job.commitSHA.prefix(7)).mmMono(size: 12, color: MMTokens.inkSoft)
+            Text(job.commitSHA.prefix(7)).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
         }
-        .foregroundStyle(MMTokens.inkMuted)
+        .foregroundStyle(.secondary)
         .lineLimit(1)
     }
 
     private func progressLabel(progress: Double, elapsed: Int, eta: Int?) -> some View {
         HStack(spacing: 0) {
             Text("\(Int(progress * 100))%")
-                .font(MMFont.rounded(size: 12, weight: .bold))
-                .foregroundStyle(MMTokens.ink)
-            Text(" · ").foregroundStyle(MMTokens.inkFaint)
-            Text(OverviewData.prettyDuration(elapsed)).mmMono(size: 12)
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(.primary)
+            Text(" · ").foregroundStyle(.tertiary)
+            Text(OverviewData.prettyDuration(elapsed)).font(.system(.caption, design: .monospaced)).monospacedDigit().foregroundStyle(.secondary)
             if let eta, eta > 0 {
-                Text(" · eta ").foregroundStyle(MMTokens.inkFaint)
-                Text("~\(OverviewData.prettyDuration(eta))").mmMono(size: 12)
+                Text(" · eta ").foregroundStyle(.tertiary)
+                Text("~\(OverviewData.prettyDuration(eta))").font(.system(.caption, design: .monospaced)).monospacedDigit().foregroundStyle(.secondary)
             }
         }
-        .font(MMFont.rounded(size: 12))
-        .foregroundStyle(MMTokens.inkMuted)
+        .font(.callout)
+        .foregroundStyle(.secondary)
     }
 
     // MARK: - Calm (idle / offline / no runner)
 
     private func calmHero(runner: Runner?) -> some View {
-        let tone = MMTokens.tone(for: runner?.state ?? .offline)
-        // Spacers center the content vertically across whatever height the
-        // parent grants (fills in wide mode, ~minHeight in the narrow scroll) —
-        // no internal maxHeight: .infinity, which collapses inside a ScrollView.
-        return VStack(spacing: 12) {
-            Spacer(minLength: 0)
-            ZStack {
-                Circle().fill(tone.opacity(0.12)).frame(width: 56, height: 56)
-                Image(systemName: idleIcon(runner))
-                    .font(.system(size: 24, weight: .medium))
-                    .foregroundStyle(tone)
-            }
-            Text(calmTitle(runner))
-                .font(MMFont.rounded(size: 16, weight: .bold))
-                .foregroundStyle(MMTokens.ink)
-            Text(calmSubtitle(runner))
-                .font(MMFont.rounded(size: 12.5))
-                .foregroundStyle(MMTokens.inkMuted)
-                .multilineTextAlignment(.center)
-            if let last = runner?.lastJob {
-                HStack(spacing: 8) {
-                    ResultGlyph(result: last.result, size: 16)
-                    Text("Last build \(last.result.rawValue) · \(OverviewData.prettyDuration(last.durationSeconds))")
-                        .font(MMFont.rounded(size: 12))
-                        .foregroundStyle(MMTokens.inkMuted)
+        // Native macOS idle/empty state (DESIGN.md §3): ContentUnavailableView's
+        // centered symbol + title + message replaces the old huge whitespace
+        // with a tiny glyph. No custom card — it fills the focal area itself.
+        ContentUnavailableView {
+            Label(calmTitle(runner), systemImage: idleIcon(runner))
+        } description: {
+            VStack(spacing: 6) {
+                Text(calmSubtitle(runner))
+                if let last = runner?.lastJob {
+                    Label(
+                        "Last build \(last.result.rawValue) · \(OverviewData.prettyDuration(last.durationSeconds))",
+                        systemImage: last.result == .success ? "checkmark.circle.fill" : "xmark.circle.fill"
+                    )
+                    .font(.callout)
                 }
-                .padding(.top, 2)
             }
-            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, minHeight: 240)
-        .padding(24)
-        .glassCard()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func idleIcon(_ r: Runner?) -> String {
@@ -172,7 +158,7 @@ struct LiveBuildHero: View {
 
     // MARK: - Helpers
 
-    private var dot: some View { Text("·").foregroundStyle(MMTokens.inkFaint) }
+    private var dot: some View { Text("·").foregroundStyle(.tertiary) }
     private func hostText(_ r: Runner) -> String { r.labels.contains("arm64") ? "arm64" : (r.labels.first ?? "") }
 
     /// The real step the build is currently on. Falls back to `job.step` (the
@@ -241,8 +227,8 @@ private struct RealStepRail: View {
                 }
             }
             Text(caption)
-                .font(MMFont.rounded(size: 11.5, weight: .semibold))
-                .foregroundStyle(MMTokens.inkMuted)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
     }
@@ -259,7 +245,7 @@ private struct RealStepRail: View {
         case .failure:   return MMTokens.tomato
         case .building:  return MMTokens.blue
         case .cancelled: return MMTokens.slate
-        case .skipped:   return MMTokens.inkFaint
+        case .skipped:   return Color(.tertiaryLabelColor)
         case .queued:    return MMTokens.glassBorder   // adaptive faint = "not yet"
         }
     }
@@ -299,8 +285,8 @@ private struct PhaseRail: View {
                     Circle().strokeBorder(MMTokens.inkFaint, lineWidth: 1.2).frame(width: 8, height: 8)
                 }
                 Text(name)
-                    .font(MMFont.rounded(size: 11.5, weight: .semibold))
-                    .foregroundStyle(state == .pending ? MMTokens.inkSoft : MMTokens.ink)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(state == .pending ? .secondary : .primary)
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

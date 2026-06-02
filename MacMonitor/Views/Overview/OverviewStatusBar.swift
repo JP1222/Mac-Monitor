@@ -40,8 +40,8 @@ struct OverviewStatusBar: View {
             }
             Text("v\(snap?.agentVersion ?? "—")")
         }
-        .font(MMFont.mono(size: 10.5))
-        .foregroundStyle(MMTokens.inkSoft)
+        .font(.system(.caption2, design: .monospaced))
+        .foregroundStyle(.secondary)
         .padding(.horizontal, 14)
         .frame(height: 26)
         .background(.bar)   // native status/toolbar material

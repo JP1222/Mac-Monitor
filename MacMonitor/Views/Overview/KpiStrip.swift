@@ -26,44 +26,36 @@ struct KpiStrip: View {
 private struct KpiCard: View {
     let metric: KpiMetric
 
+    // GroupBox is Apple's prescribed native primitive for a titled stat group
+    // (DESIGN.md §3) — the metric name is the box label, the value + sub are its
+    // content. No hand-rolled card surface.
     var body: some View {
-        HStack(spacing: 11) {
-            // Accent stripe (the prototype's absolutely-positioned 3px bar).
-            RoundedRectangle(cornerRadius: 3)
-                .fill(metric.tone)
-                .frame(width: 3)
-                .padding(.vertical, 2)
-
+        GroupBox {
             VStack(alignment: .leading, spacing: 4) {
-                Text(metric.label)
-                    .font(MMFont.rounded(size: 10.5, weight: .heavy))
-                    .tracking(0.8)
-                    .textCase(.uppercase)
-                    .foregroundStyle(MMTokens.inkSoft)
-
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(metric.value)
-                        .font(.system(size: 28, weight: .heavy, design: .rounded))
-                        .kerning(-0.8)
-                        .foregroundStyle(MMTokens.ink)
-                        .lineLimit(1)
+                        .font(.system(.title, design: .rounded).weight(.semibold))
+                        .monospacedDigit()
                         .contentTransition(.numericText())
+                        .foregroundStyle(metric.tone)
+                        .lineLimit(1)
                     if let trend = metric.trend {
                         Text(trend)
-                            .font(MMFont.rounded(size: 11, weight: .bold))
-                            .foregroundStyle(metric.trendTone ?? MMTokens.mint)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(metric.trendTone ?? Color.secondary)
                     }
                 }
-
                 Text(metric.sub)
-                    .font(MMFont.rounded(size: 11.5))
-                    .foregroundStyle(MMTokens.inkMuted)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, minHeight: 40, alignment: .topLeading)
+        } label: {
+            Text(metric.label)
+                .font(.caption.weight(.semibold))
+                .textCase(.uppercase)
+                .foregroundStyle(.secondary)
         }
-        .padding(EdgeInsets(top: 14, leading: 13, bottom: 14, trailing: 14))
-        .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
-        .glassCard(cornerRadius: 12)
     }
 }
