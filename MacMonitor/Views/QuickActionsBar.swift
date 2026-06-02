@@ -28,8 +28,7 @@ public struct QuickActionsBar: View {
                         .font(MMFont.rounded(size: 11.5, weight: .semibold))
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glassProminent)
-                .tint(MMTokens.brand)
+                .buttonStyle(.bordered)
 
                 // Quit — a menu-bar (`.accessory`) app has no app menu, so this is
                 // the user's way out. ⌘Q works while the popover is focused.
@@ -38,7 +37,7 @@ public struct QuickActionsBar: View {
                     Label("Quit", systemImage: "power")
                         .font(MMFont.rounded(size: 11.5, weight: .semibold))
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.bordered)
                 .keyboardShortcut("q", modifiers: .command)
                 .help("Quit Mac Monitor")
                 // Restart / Prune buttons intentionally removed: they act on the
