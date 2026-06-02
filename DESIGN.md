@@ -22,7 +22,8 @@ Apple's governing rule: Liquid Glass is the **navigation/chrome layer that float
 - **Never glass (all content):** KPI cards, Fleet tiles, Queue/Recent rows, Build-step list, the hero panel, the status bar.
 - Use glass **sparingly** — over-applying to custom controls "provide[s] a subpar user experience" and degrades rendering perf. [verified]
 - **Never stack glass on glass** — elements sitting on a glass surface use *fills / transparency / vibrancy*, not a second glass layer. [verified, WWDC25-219]
-- Any **custom** glass must be wrapped in a **`GlassEffectContainer`** (recommended for perf; required for cross-element morph). [verified] — ✅ already done in `PopoverHeader` and `QuickActionsBar`.
+- Any **custom** glass must be wrapped in a **`GlassEffectContainer`** (recommended for perf; required for cross-element morph). [verified] — ✅ done in `PopoverHeader`.
+- **Glass needs content behind it to read.** In a dark, content-sparse area (e.g. the menu-bar popover footer) a `.glass` button has nothing to refract and blends into the background, while `.glassProminent` reads as a loud color block. Use **`.buttonStyle(.bordered)`** there — a clearly-defined standard button, no accent fill. Reserve `.glass`/`.glassProminent` for controls floating over actual content. [pattern — learned in PR #7]
 
 ## 2. Background ownership  [verified]
 
@@ -74,6 +75,7 @@ Content background = **the system window background**. Remove custom fills/darke
 - ❌ Hardcoded `MMFont` point sizes for chrome → **system text styles**.
 - ❌ Custom accent blue for selection → **`.accentColor`**.
 - ❌ `.rect(cornerRadius: .containerConcentric)` (unverified) → **`ConcentricRectangle`**.
+- ❌ `.glass` / `.glassProminent` buttons in a dark, content-sparse area (they blend in / read too loud) → `.bordered`.
 - ❌ Pixel-porting the JSX prototype as the source of truth.
 
 ## 9. Migration map (current code → target)
