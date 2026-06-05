@@ -191,20 +191,15 @@ public struct GitHubClient: GitHubClienting {
             for run in runs {
                 group.addTask {
                     do {
-                        // per_page=100 so a wide fan-out matrix isn't truncated
-                        // at the default 30 — we need the full job list to count
-                        // completion accurately.
-                        let req = try endpoint(
-                            "/repos/\(repository.slug)/actions/runs/\(run.id)/jobs",
-                            queryItems: [URLQueryItem(name: "per_page", value: "100")]
-                        )
-                        let payload = try await decode(APIJobsResponse.self, from: req)
-                        // Run-level fan-out counts for matrixProgress. total_count
-                        // is authoritative for the denominator; completed is taken
-                        // from the page (≤100 jobs covers our matrices).
-                        let totalJobs = payload.total_count ?? payload.jobs.count
-                        let completedJobs = payload.jobs.filter { $0.status == "completed" }.count
-                        return payload.jobs
+                        // Fetch ALL job pages (not just the first 100). For a run
+                        // wider than one page, total_count is run-wide while a
+                        // single page's completed-count is page-capped — mixing
+                        // those populations makes matrixProgress under-report and
+                        // never converge to its true fraction. Paginating draws
+                        // numerator and denominator from the SAME full job set.
+                        let (allJobs, totalJobs) = try await fetchAllJobs(for: repository, runID: run.id)
+                        let completedJobs = allJobs.filter { $0.status == "completed" }.count
+                        return allJobs
                             .filter { $0.status == "in_progress" }
                             .map { $0.toDomain(run: run, repository: repository,
                                                runJobsTotal: totalJobs,
@@ -217,6 +212,35 @@ public struct GitHubClient: GitHubClienting {
             for await batch in group { jobs.append(contentsOf: batch) }
         }
         return jobs
+    }
+
+    /// Fetch EVERY job for a run, following pagination so a wide fan-out matrix
+    /// (>100 jobs) isn't truncated to a single page. Returns the full job list
+    /// plus the run-wide `total_count`, so callers compute counts (e.g.
+    /// matrixProgress) with numerator and denominator drawn from the same
+    /// population. Capped at 10 pages (1000 jobs — GitHub matrices max at 256)
+    /// to guard against an unbounded loop on a misbehaving response.
+    private func fetchAllJobs(for repository: Repository, runID: Int) async throws -> (jobs: [APIWorkflowJob], total: Int) {
+        var all: [APIWorkflowJob] = []
+        var total = 0
+        var page = 1
+        while page <= 10 {
+            let req = try endpoint(
+                "/repos/\(repository.slug)/actions/runs/\(runID)/jobs",
+                queryItems: [
+                    URLQueryItem(name: "per_page", value: "100"),
+                    URLQueryItem(name: "page", value: String(page)),
+                ]
+            )
+            let payload = try await decode(APIJobsResponse.self, from: req)
+            all.append(contentsOf: payload.jobs)
+            total = payload.total_count ?? all.count
+            // Stop once we've collected the whole run, or the page came back
+            // short (the last page).
+            if all.count >= total || payload.jobs.count < 100 { break }
+            page += 1
+        }
+        return (all, total)
     }
 
     public func fetchQueuedJobs(for repository: Repository) async throws -> [QueueItem] {
@@ -256,6 +280,14 @@ public struct GitHubClient: GitHubClienting {
             // runs if the first page came back out of order. (The ViewModel
             // re-sorts by finishedAt later, but only after this prefix.)
             .sorted { $0.created_at > $1.created_at }
+            // Drop QUEUED runs: they haven't started executing, so they carry no
+            // real result or duration. ghJobResult maps any non-completed status
+            // (including "queued") to `.building`, which would render a
+            // misleading spinner with a fabricated ~0s elapsed (created_at ≈
+            // updated_at) — and these runs ALREADY appear in the dedicated Queue
+            // section. in_progress runs ARE kept on purpose (the live spinner
+            // described above); only the not-yet-started ones are filtered.
+            .filter { $0.status != "queued" }
             // Drop skipped runs (path filters, scheduled no-ops, conditional
             // workflows that didn't meet their `if:` clause). They contain
             // no actionable signal but inflate the row count.
@@ -284,7 +316,14 @@ public struct GitHubClient: GitHubClienting {
             for run in runs {
                 group.addTask {
                     do {
-                        let r = try endpoint("/repos/\(repository.slug)/actions/runs/\(run.id)/jobs")
+                        // per_page=100 (like fetchInProgressJobs): the default
+                        // 30 truncates a wide fan-out matrix, so a runner whose
+                        // only recent job sat past index 30 would never get a
+                        // lastJob summary and its idle card would stay empty.
+                        let r = try endpoint(
+                            "/repos/\(repository.slug)/actions/runs/\(run.id)/jobs",
+                            queryItems: [URLQueryItem(name: "per_page", value: "100")]
+                        )
                         return try await decode(APIJobsResponse.self, from: r).jobs
                     } catch {
                         return []
