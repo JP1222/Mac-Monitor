@@ -29,6 +29,25 @@ enum DeviceHealthCollector {
     static func collect() -> DeviceSnapshot {
         let now = Date()
         let mem = memoryUsage()
+
+        // Run the three shell-out-bearing probes CONCURRENTLY so /health's wall
+        // time is max(probe), not sum(probe). Sequentially these stack — pgrep +
+        // `docker ps` + the du/df disk probes can sum past the app's 12s /health
+        // timeout on a busy machine (AgentClient.fetchSnapshot uses
+        // timeoutInterval = 12), intermittently dropping the WHOLE device
+        // snapshot even though each probe alone is within its own budget. Each
+        // var is written by exactly one task and read after group.wait()
+        // (which establishes happens-before), so there's no data race.
+        var orb = false
+        var containers = 0
+        var diskUsage: [DiskUsage] = []
+        let group = DispatchGroup()
+        let q = DispatchQueue(label: "macmonitor.agent.collect", attributes: .concurrent)
+        q.async(group: group) { orb = orbStackRunning() }
+        q.async(group: group) { containers = dockerContainersRunning() }
+        q.async(group: group) { diskUsage = disks() }
+        group.wait()
+
         return DeviceSnapshot(
             deviceID: deviceIdentifier(),
             capturedAt: now,
@@ -38,9 +57,9 @@ enum DeviceHealthCollector {
             memoryTotalBytes: mem.total,
             thermalState: thermalState(),
             uptimeSeconds: uptimeSeconds(),
-            orbStackRunning: orbStackRunning(),
-            dockerContainersRunning: dockerContainersRunning(),
-            disks: disks(),
+            orbStackRunning: orb,
+            dockerContainersRunning: containers,
+            disks: diskUsage,
             agentVersion: "0.2.0"
         )
     }
@@ -325,8 +344,21 @@ enum DeviceHealthCollector {
         let deadline = Date().addingTimeInterval(timeout)
         while task.isRunning && Date() < deadline { usleep(20_000) }
         if task.isRunning { task.terminate() }
-        task.waitUntilExit()
-        // Drain both pipes (discard stderr). Safe post-exit given tiny outputs.
+        // BOUND the post-SIGTERM wait. `waitUntilExit()` has NO timeout, so a
+        // child that ignores/blocks SIGTERM, or is wedged in uninterruptible
+        // state (a `du` on a stuck/failing-disk mount, `docker` against a hung
+        // daemon), would pin this work-queue thread FOREVER — and every
+        // subsequent /health poll wedges another, eventually exhausting the
+        // agent's pool. We still don't SIGKILL (orphans docker's children); we
+        // poll for exit with a hard cap instead of blocking unboundedly.
+        let exitDeadline = Date().addingTimeInterval(2)
+        while task.isRunning && Date() < exitDeadline { usleep(20_000) }
+        // If the child is STILL alive we must NOT drain: its fds are open, so
+        // readDataToEndOfFile would block exactly like waitUntilExit did. Give
+        // up on this probe's output and report a synthetic timeout — a missing
+        // data source degrades one fleet field; it never hangs /health.
+        guard !task.isRunning else { return (-1, "") }
+        // Exited: draining is safe (fds closed, tiny output → no 64KB deadlock).
         let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
         _ = errPipe.fileHandleForReading.readDataToEndOfFile()
         return (task.terminationStatus, String(data: outData, encoding: .utf8) ?? "")
