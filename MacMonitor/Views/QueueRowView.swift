@@ -36,7 +36,10 @@ public struct QueueRowView: View {
                 .foregroundStyle(isLongest ? MMTokens.amber : MMTokens.inkSoft)
                 .fixedSize()
         }
+        // .horizontal 6 (not 4) so the leading glyph column lines up exactly
+        // with RecentRunRowView's rows right below — the two sections read as
+        // one continuous glyph column.
         .padding(.vertical, 7)
-        .padding(.horizontal, 4)
+        .padding(.horizontal, 6)
     }
 }
