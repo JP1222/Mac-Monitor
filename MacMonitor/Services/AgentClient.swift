@@ -1,15 +1,18 @@
 // AgentClient.swift
 //
-// Talks to the local agent running on each Mac mini. The agent's contract
-// (HTTP) is being designed in a separate phase — this stub describes the
-// shape so the dashboard wiring can land first.
+// Talks to the local MacMonitorAgent daemon (see ../MacMonitorAgent/). The
+// agent runs as a LaunchAgent on each monitored Mac and listens on port 8765,
+// loopback (127.0.0.1) by default; setting MM_AGENT_BIND to a private address
+// (e.g. a Tailscale IP) exposes /health to another Mac on that mesh.
 //
-// Expected agent endpoints (running on the mini, reachable at e.g.
-// http://studio.local:8080):
+// Agent endpoints (see HTTPServer.swift for the server side):
 //
-//   GET /health        → JSON DeviceSnapshot
-//   POST /actions/restart-runner  → kicks `launchctl kickstart`
+//   GET  /health                  → JSON DeviceSnapshot
+//   POST /actions/restart-runners → kickstart all actions.runner.* LaunchAgents
 //   POST /actions/prune-cache     → `docker buildx prune -f`
+//
+// The two POSTs are token-gated (Bearer secret shared via the App Group
+// container); GET /health is open.
 
 import Foundation
 
@@ -32,8 +35,9 @@ public struct MockAgentClient: AgentClienting {
 
 /// Real HTTP client that talks to MacMonitorAgent (see ../MacMonitorAgent/).
 /// The agent is a standalone Swift executable installed as a LaunchAgent on
-/// each Mac in the build farm. We POST nothing — agent only exposes a GET
-/// `/health` endpoint that returns the current DeviceSnapshot.
+/// each Mac in the build farm. GET `/health` returns the current
+/// DeviceSnapshot; the two token-gated `/actions/*` POSTs restart the
+/// self-hosted runners and prune the BuildKit cache.
 ///
 /// Behavior on connection failure: throws `AgentError.unreachable`. Caller
 /// (DashboardViewModel) catches and falls back to the mock so the popover
