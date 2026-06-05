@@ -66,7 +66,13 @@ enum AgentInstaller {
         @unknown default:
             register(svc)
         }
-        UserDefaults.standard.set(currentStamp, forKey: bundleStampKey)
+        // The bundle stamp is persisted INSIDE register() on success only —
+        // deliberately NOT here unconditionally. The .requiresApproval path
+        // above does not register, so it must leave lastStamp untouched;
+        // otherwise a later .enabled launch would see lastStamp == currentStamp,
+        // skip the re-registration the .enabled branch exists to perform, and
+        // leave the helper pinned to a stale BTM signature (spawns EX_CONFIG,
+        // never answers on :8765) with no path to self-heal.
         return svc.status
     }
 
@@ -85,6 +91,11 @@ enum AgentInstaller {
     private static func register(_ svc: SMAppService) {
         do {
             try svc.register()
+            // Record the bundle we just registered, so a later launch can detect
+            // an app update (the stamp changes) and re-register. Only stamp on
+            // SUCCESS: if register() threw, lastStamp stays stale so the next
+            // launch retries instead of believing it's current.
+            UserDefaults.standard.set(bundleStamp(), forKey: bundleStampKey)
             log.notice("local agent registered")
         } catch {
             log.error("local agent register failed: \(error.localizedDescription, privacy: .public)")
