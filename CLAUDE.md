@@ -160,6 +160,29 @@ Mac Monitor watches Yolo-Rollo CI, which runs on this MacBook Pro via self-hoste
 - Body explains **why** when fixing a regression — reference the symptom and root cause so the lesson survives in `git log`.
 - One concern per commit. Solo dev project — no Co-Authored-By tags.
 
+## Branch & merge workflow
+
+Changes land on `main` **only through CI-gated PRs** — no more direct
+`git merge`/`push` to main (kept as an admin escape hatch for emergencies only).
+`main` is a protected branch: it requires the `Build (macOS 26 / Xcode 26)`
+status check (from `build.yml`) to pass, enforces linear history, and blocks
+force-push/delete. Reviews are NOT required (solo dev can't self-approve).
+
+Per change, from the feature branch:
+
+```bash
+git push -u origin <branch>
+gh pr create --fill --base main
+gh pr merge --auto --rebase        # --rebase to keep per-concern commits + linear history
+```
+
+GitHub then merges to `main` automatically once the Build check is green, and
+deletes the branch (delete-branch-on-merge is on). Use `--rebase`, not
+`--squash` (squash collapses a multi-commit PR into one, losing the
+"one concern per commit" granularity) and not `--merge` (a merge commit
+violates the required linear history). Don't wait around — `--auto` lands it
+when CI passes; check later with `gh pr checks` / `gh pr view`.
+
 ## When you're stuck
 
 | Symptom | First check |
