@@ -63,7 +63,19 @@ public struct ResultGlyph: View {
                     .frame(width: size * 0.62, height: size * 0.62)
                     .rotationEffect(angle)
             }
-        case .queued, .skipped:
+        case .queued:
+            // Dotted hollow ring = "waiting, not started". Without a visible
+            // symbol the faint background disc reads as an empty gap in the
+            // queue column (the slot is column-aligned with the recent-runs
+            // glyphs right below). Same `size * 0.62` diameter as the building
+            // spinner so the column flows "dotted ring → partial ring" across
+            // the Queue/Recent sections instead of "blank → ring".
+            Circle()
+                .stroke(MMTokens.inkSoft, style: StrokeStyle(lineWidth: 1.3, dash: [1.6, 2.2]))
+                .frame(width: size * 0.62, height: size * 0.62)
+        case .skipped:
+            // A skipped job legitimately ran nothing — leave the slot empty
+            // (faint disc only), unlike a queued job which is actively pending.
             EmptyView()
         }
     }
@@ -75,6 +87,7 @@ public struct ResultGlyph: View {
         ResultGlyph(result: .failure)
         ResultGlyph(result: .building)
         ResultGlyph(result: .queued)
+        ResultGlyph(result: .skipped)
         ResultGlyph(result: .cancelled)
     }
     .padding(24)
