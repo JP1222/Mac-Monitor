@@ -117,17 +117,31 @@ enum AgentActions {
         // Timeout watchdog: SIGTERM at the deadline and let the child wind
         // down. We don't SIGKILL — force-killing `docker` orphans its children
         // under launchd. The concurrent pipe draining above (not the kill) is
-        // what prevents the >64KB deadlock for `docker buildx prune`; the
-        // timeout only bounds a hung child, and SIGTERM does that cleanly.
+        // what prevents the >64KB deadlock for `docker buildx prune`.
         let deadline = Date().addingTimeInterval(timeout)
         while task.isRunning && Date() < deadline { usleep(20_000) }
         if task.isRunning { task.terminate() }
-        task.waitUntilExit()
-        readGroup.wait()
+        // BOUND the post-SIGTERM wait. `waitUntilExit()` has NO timeout, so a
+        // child that ignores/blocks SIGTERM (a trap handler) or is wedged in an
+        // uninterruptible state (a hung docker daemon socket) would pin this
+        // work-queue thread FOREVER — and since serve() runs route work on a
+        // shared concurrent queue, enough such events exhaust the agent's pool
+        // and it stops answering. We still refuse to SIGKILL (orphans docker's
+        // children); we just poll for exit with a hard cap instead of blocking
+        // unboundedly. The (possibly still-running) child winds down on its own.
+        let exitDeadline = Date().addingTimeInterval(3)
+        while task.isRunning && Date() < exitDeadline { usleep(20_000) }
+        // Only touch outData/errData once the io tasks have finished writing
+        // them — reading mid-write (if the child never closed its fds) is a data
+        // race. If the drain didn't complete, give up on the output.
+        let drained = readGroup.wait(timeout: .now() + 1) == .success
+        // `terminationStatus` throws NSInvalidArgumentException if read before
+        // the process exits — guard it. A child we gave up on reports as -1.
+        let code: Int32 = task.isRunning ? -1 : task.terminationStatus
         return (
-            task.terminationStatus,
-            String(data: outData, encoding: .utf8) ?? "",
-            String(data: errData, encoding: .utf8) ?? ""
+            code,
+            drained ? (String(data: outData, encoding: .utf8) ?? "") : "",
+            drained ? (String(data: errData, encoding: .utf8) ?? "") : ""
         )
     }
 }
