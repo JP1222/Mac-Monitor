@@ -91,6 +91,12 @@ enum AgentActions {
         guard !installed.isEmpty else {
             return Result(ok: false, message: "No actions.runner.*.plist in ~/Library/LaunchAgents. Install with actions-runner/svc.sh install.", affected: nil)
         }
+        // Signal intent to the runner-priority autoscaler (Mac Mini primary /
+        // MacBook failover) BEFORE touching launchd, so a racing 60s tick already
+        // sees it: pinned => keep this Mac's runners online alongside the Mac Mini
+        // (2-wide; both take jobs); unpinned => let mini-priority retire them when
+        // idle. No-op when ~/runner-bin (the autoscaler's home) is absent.
+        setRunnerPin(online)
         let uid = getuid()
         let loaded = Set(loadedRunnerLabels())
         var changed: [String] = []
@@ -146,6 +152,24 @@ enum AgentActions {
                 let label = String(parts[2])
                 return label.hasPrefix("actions.runner.") ? label : nil
             }
+    }
+
+    /// Path of the runner-priority autoscaler's manual-override sentinel.
+    private static let runnerPinPath = (NSHomeDirectory() as NSString)
+        .appendingPathComponent("runner-bin/.macbook-pinned")
+
+    /// Write (pin) or remove (unpin) the autoscaler override sentinel. Best-effort
+    /// and only when ~/runner-bin (the watchdog's home) exists, so it's a harmless
+    /// no-op on a Mac that doesn't run the mini-priority autoscaler.
+    private static func setRunnerPin(_ pinned: Bool) {
+        let fm = FileManager.default
+        let dir = (runnerPinPath as NSString).deletingLastPathComponent
+        guard fm.fileExists(atPath: dir) else { return }
+        if pinned {
+            fm.createFile(atPath: runnerPinPath, contents: Data())
+        } else {
+            try? fm.removeItem(atPath: runnerPinPath)
+        }
     }
 
     // MARK: - Shared helpers
