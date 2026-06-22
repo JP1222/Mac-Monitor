@@ -30,6 +30,26 @@ public struct QuickActionsBar: View {
                 }
                 .buttonStyle(.bordered)
 
+                // Local runner online/offline. Only shown when the local agent
+                // reports an installed runner LaunchAgent, so it never appears
+                // for a setup whose runners live on a remote, externally-managed
+                // machine (the reason the Restart/Prune buttons were pulled).
+                if let control = viewModel.localRunnerControl {
+                    Button {
+                        Task { await viewModel.setRunner(online: !control.online, on: control.device) }
+                    } label: {
+                        Label(control.online ? "On" : "Off",
+                              systemImage: control.online ? "bolt.fill" : "bolt.slash")
+                            .font(MMFont.rounded(size: 11.5, weight: .semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(control.online ? .green : nil)
+                    .disabled(viewModel.isPerformingAction)
+                    .help(control.online
+                          ? "Runner online — click to take this Mac out of the CI pool"
+                          : "Runner offline — click to bring this Mac into the CI pool")
+                }
+
                 // Quit — a menu-bar (`.accessory`) app has no app menu, so this is
                 // the user's way out. ⌘Q works while the popover is focused.
                 // Secondary action → translucent `.glass`.
@@ -40,12 +60,12 @@ public struct QuickActionsBar: View {
                 .buttonStyle(.bordered)
                 .keyboardShortcut("q", modifiers: .command)
                 .help("Quit Mac Monitor")
-                // Restart / Prune buttons intentionally removed: they act on the
-                // LOCAL agent's runner LaunchAgents, but this setup runs runners on
-                // a remote machine and schedules them externally — so the buttons
-                // could never succeed here and only produced confusing errors.
-                // The agent-side actions + ViewModel methods remain for a future
-                // setup that wants in-app control.
+                // The full Restart + Prune-cache buttons stay removed (they act
+                // on the LOCAL agent but only make sense where runners actually
+                // run — see git history). The online/offline toggle above is the
+                // one in-app control, and it self-hides unless the local agent
+                // reports an installed runner, so it never shows the confusing
+                // "no runners here" error those buttons did.
             }
         }
         .controlSize(.large)

@@ -9,6 +9,8 @@
 //
 //   GET  /health                  → JSON DeviceSnapshot
 //   POST /actions/restart-runners → kickstart all actions.runner.* LaunchAgents
+//   POST /actions/start-runners   → load actions.runner.* (runners online)
+//   POST /actions/stop-runners    → unload actions.runner.* (runners offline)
 //   POST /actions/prune-cache     → `docker buildx prune -f`
 //
 // The two POSTs are token-gated (Bearer secret shared via the App Group
@@ -19,6 +21,7 @@ import Foundation
 public protocol AgentClienting: Sendable {
     func fetchSnapshot(for device: Device) async throws -> DeviceSnapshot
     func restartRunner(on device: Device) async throws
+    func setRunner(online: Bool, on device: Device) async throws
     func pruneCache(on device: Device) async throws
 }
 
@@ -30,6 +33,7 @@ public struct MockAgentClient: AgentClienting {
             ?? DashboardSnapshot.mock.deviceSnapshots[0]
     }
     public func restartRunner(on device: Device) async throws {}
+    public func setRunner(online: Bool, on device: Device) async throws {}
     public func pruneCache(on device: Device) async throws {}
 }
 
@@ -110,6 +114,10 @@ public struct AgentClient: AgentClienting {
 
     public func restartRunner(on device: Device) async throws {
         try await postAction(path: "/actions/restart-runners", on: device)
+    }
+
+    public func setRunner(online: Bool, on device: Device) async throws {
+        try await postAction(path: online ? "/actions/start-runners" : "/actions/stop-runners", on: device)
     }
 
     public func pruneCache(on device: Device) async throws {

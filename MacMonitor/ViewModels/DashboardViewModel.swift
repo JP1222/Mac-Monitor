@@ -378,6 +378,31 @@ public final class DashboardViewModel: ObservableObject {
         }
     }
 
+    public func setRunner(online: Bool, on device: Device) async {
+        isPerformingAction = true
+        defer { isPerformingAction = false }
+        do {
+            try await agent.setRunner(online: online, on: device)
+            showActionToast(online ? "Runner online" : "Runner offline")
+            await refresh()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    /// The local Mac's runner-control state for the QuickActionsBar toggle, or
+    /// nil when no monitored device reports an installed runner LaunchAgent (or
+    /// the agent is an older build that doesn't report it). Scoped to the local
+    /// Mac (loopback) today; per-device toggles for a multi-Mac fleet are a
+    /// future extension. With the default single-device setup there is exactly
+    /// one device snapshot, so `.first` is unambiguous.
+    public var localRunnerControl: (device: Device, online: Bool)? {
+        let device = snapshot.devices.first { $0.host == "127.0.0.1" || $0.host == "localhost" }
+            ?? snapshot.devices.first
+        guard let device, let online = snapshot.deviceSnapshots.first?.runnersOnline else { return nil }
+        return (device, online)
+    }
+
     private func showActionToast(_ message: String) {
         lastActionToast = message
         // Auto-dismiss. Capture the message to detect if a NEW toast
