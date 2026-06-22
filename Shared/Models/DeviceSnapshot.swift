@@ -81,6 +81,12 @@ public struct DeviceSnapshot: Codable, Identifiable, Hashable, Sendable {
     // Build infrastructure
     public let orbStackRunning: Bool
     public let dockerContainersRunning: Int
+    /// Self-hosted runner LaunchAgents on the device: how many are installed
+    /// and how many are currently loaded (online). Optional so snapshots from
+    /// an older agent build still decode — nil → the app hides the runner
+    /// toggle for that device. New agent builds always populate both.
+    public let runnerAgentsInstalled: Int?
+    public let runnerAgentsLoaded: Int?
     public let disks: [DiskUsage]
 
     public let agentVersion: String
@@ -96,6 +102,8 @@ public struct DeviceSnapshot: Codable, Identifiable, Hashable, Sendable {
         uptimeSeconds: TimeInterval,
         orbStackRunning: Bool,
         dockerContainersRunning: Int,
+        runnerAgentsInstalled: Int? = nil,
+        runnerAgentsLoaded: Int? = nil,
         disks: [DiskUsage],
         agentVersion: String
     ) {
@@ -109,6 +117,8 @@ public struct DeviceSnapshot: Codable, Identifiable, Hashable, Sendable {
         self.uptimeSeconds = uptimeSeconds
         self.orbStackRunning = orbStackRunning
         self.dockerContainersRunning = dockerContainersRunning
+        self.runnerAgentsInstalled = runnerAgentsInstalled
+        self.runnerAgentsLoaded = runnerAgentsLoaded
         self.disks = disks
         self.agentVersion = agentVersion
     }
@@ -134,5 +144,13 @@ public struct DeviceSnapshot: Codable, Identifiable, Hashable, Sendable {
     /// card "Cache" stat. Nil when no cache layer is present.
     public var buildKitCacheFraction: Double? {
         disks.first { $0.layer == .buildKitCache }?.usedFraction
+    }
+
+    /// Whether this device's self-hosted runners are online, or nil when the
+    /// agent didn't report runner status (older build) or none are installed —
+    /// the UI hides the online/offline toggle in those cases.
+    public var runnersOnline: Bool? {
+        guard let installed = runnerAgentsInstalled, installed > 0 else { return nil }
+        return (runnerAgentsLoaded ?? 0) > 0
     }
 }

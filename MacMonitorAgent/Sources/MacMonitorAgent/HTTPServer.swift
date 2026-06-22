@@ -143,6 +143,8 @@ final class HTTPServer {
             GET  /health                  → DeviceSnapshot (JSON)
             POST /actions/prune-cache     → docker buildx prune -f
             POST /actions/restart-runners → kickstart all actions.runner.*
+            POST /actions/start-runners   → load actions.runner.* (online)
+            POST /actions/stop-runners    → unload actions.runner.* (offline)
 
             Version 0.1
             """
@@ -160,6 +162,20 @@ final class HTTPServer {
                 return
             }
             let r = AgentActions.restartRunners()
+            respondJSON(connection: connection, status: r.ok ? 200 : 500, encoding: r)
+        case ("POST", "/actions/start-runners"):
+            guard mutationAuthorized() else {
+                respond(connection: connection, status: 401, body: Data("Unauthorized".utf8), contentType: "text/plain")
+                return
+            }
+            let r = AgentActions.setRunners(online: true)
+            respondJSON(connection: connection, status: r.ok ? 200 : 500, encoding: r)
+        case ("POST", "/actions/stop-runners"):
+            guard mutationAuthorized() else {
+                respond(connection: connection, status: 401, body: Data("Unauthorized".utf8), contentType: "text/plain")
+                return
+            }
+            let r = AgentActions.setRunners(online: false)
             respondJSON(connection: connection, status: r.ok ? 200 : 500, encoding: r)
         case (_, _) where method != "GET" && method != "POST":
             respond(connection: connection, status: 405, body: Data("Method Not Allowed".utf8), contentType: "text/plain")

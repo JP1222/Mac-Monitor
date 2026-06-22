@@ -7,6 +7,11 @@
 //   POST /actions/restart-runners → kickstart all actions.runner.* launchd
 //                                  services (your self-hosted GitHub
 //                                  Actions runners)
+//   POST /actions/start-runners  → bootstrap (load) all actions.runner.*
+//                                  LaunchAgents — this Mac's runners join the
+//                                  CI pool (online)
+//   POST /actions/stop-runners   → bootout (unload) them — this Mac's runners
+//                                  leave the pool (offline)
 //
 // Returns a small JSON body so the menu bar app can surface success/error
 // without parsing log noise.
@@ -71,6 +76,76 @@ enum AgentActions {
             return Result(ok: true, message: "Restarted \(restarted.count) runner(s)", affected: restarted)
         }
         return Result(ok: !restarted.isEmpty, message: errors.joined(separator: "; "), affected: restarted)
+    }
+
+    // MARK: - Start / stop runners
+
+    /// Bring this Mac's self-hosted runner LaunchAgents online or offline by
+    /// (un)loading them through launchd — the in-app equivalent of
+    /// `actions-runner/svc.sh start|stop`. `online == true` bootstraps every
+    /// installed `actions.runner.*` agent that isn't already loaded;
+    /// `online == false` boots out every one that is. Idempotent: a runner
+    /// already in the requested state is left untouched and still counts as ok.
+    static func setRunners(online: Bool) -> Result {
+        let installed = installedRunnerLaunchAgents()
+        guard !installed.isEmpty else {
+            return Result(ok: false, message: "No actions.runner.*.plist in ~/Library/LaunchAgents. Install with actions-runner/svc.sh install.", affected: nil)
+        }
+        let uid = getuid()
+        let loaded = Set(loadedRunnerLabels())
+        var changed: [String] = []
+        var errors: [String] = []
+        for agent in installed {
+            let alreadyInState = online ? loaded.contains(agent.label) : !loaded.contains(agent.label)
+            if alreadyInState { continue }
+            let r = online
+                ? runShell("/bin/launchctl", args: ["bootstrap", "gui/\(uid)", agent.path], timeout: 15)
+                : runShell("/bin/launchctl", args: ["bootout", "gui/\(uid)/\(agent.label)"], timeout: 15)
+            if r.exitCode == 0 {
+                changed.append(agent.label)
+            } else {
+                errors.append("\(agent.label): \(r.stderr.prefix(80))")
+            }
+        }
+        let verb = online ? "online" : "offline"
+        guard errors.isEmpty else {
+            return Result(ok: !changed.isEmpty, message: errors.joined(separator: "; "), affected: changed)
+        }
+        return Result(
+            ok: true,
+            message: changed.isEmpty ? "Runner(s) already \(verb)" : "\(changed.count) runner(s) \(verb)",
+            affected: changed.isEmpty ? installed.map(\.label) : changed
+        )
+    }
+
+    /// A self-hosted runner LaunchAgent installed on this Mac.
+    private struct RunnerLaunchAgent { let label: String; let path: String }
+
+    /// All `actions.runner.*.plist` files the runner dropped in
+    /// ~/Library/LaunchAgents during `svc.sh install`. The launchd label is the
+    /// filename without the `.plist` suffix.
+    private static func installedRunnerLaunchAgents() -> [RunnerLaunchAgent] {
+        let dir = (NSHomeDirectory() as NSString).appendingPathComponent("Library/LaunchAgents")
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return [] }
+        return names
+            .filter { $0.hasPrefix("actions.runner.") && $0.hasSuffix(".plist") }
+            .sorted()
+            .map { RunnerLaunchAgent(label: String($0.dropLast(".plist".count)), path: (dir as NSString).appendingPathComponent($0)) }
+    }
+
+    /// Labels of the currently-loaded `actions.runner.*` LaunchAgents (those in
+    /// `launchctl list`). Empty on failure or when none are loaded.
+    private static func loadedRunnerLabels() -> [String] {
+        let list = runShell("/bin/launchctl", args: ["list"], timeout: 5)
+        guard list.exitCode == 0 else { return [] }
+        return list.stdout
+            .split(whereSeparator: \.isNewline)
+            .compactMap { line -> String? in
+                let parts = line.split(separator: "\t", omittingEmptySubsequences: false)
+                guard parts.count >= 3 else { return nil }
+                let label = String(parts[2])
+                return label.hasPrefix("actions.runner.") ? label : nil
+            }
     }
 
     // MARK: - Shared helpers
