@@ -41,11 +41,13 @@ enum DeviceHealthCollector {
         var orb = false
         var containers = 0
         var diskUsage: [DiskUsage] = []
+        var runners = (installed: 0, loaded: 0)
         let group = DispatchGroup()
         let q = DispatchQueue(label: "macmonitor.agent.collect", attributes: .concurrent)
         q.async(group: group) { orb = orbStackRunning() }
         q.async(group: group) { containers = dockerContainersRunning() }
         q.async(group: group) { diskUsage = disks() }
+        q.async(group: group) { runners = localRunnerStatus() }
         group.wait()
 
         return DeviceSnapshot(
@@ -59,8 +61,10 @@ enum DeviceHealthCollector {
             uptimeSeconds: uptimeSeconds(),
             orbStackRunning: orb,
             dockerContainersRunning: containers,
+            runnerAgentsInstalled: runners.installed,
+            runnerAgentsLoaded: runners.loaded,
             disks: diskUsage,
-            agentVersion: "0.2.0"
+            agentVersion: "0.3.0"
         )
     }
 
@@ -310,6 +314,31 @@ enum DeviceHealthCollector {
         if pct > 0.85 { return .critical }
         if pct > 0.7  { return .warn }
         return .ok
+    }
+
+    // MARK: - Self-hosted runners
+
+    /// Counts the GitHub Actions self-hosted runner LaunchAgents on this Mac:
+    /// how many are installed (an `actions.runner.*.plist` in
+    /// ~/Library/LaunchAgents) and how many are currently loaded
+    /// (`launchctl list`). Drives the in-app online/offline toggle:
+    /// installed > 0 shows the control, loaded > 0 means online.
+    private static func localRunnerStatus() -> (installed: Int, loaded: Int) {
+        let dir = (NSHomeDirectory() as NSString).appendingPathComponent("Library/LaunchAgents")
+        let installed = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? [])
+            .filter { $0.hasPrefix("actions.runner.") && $0.hasSuffix(".plist") }
+            .count
+        guard installed > 0 else { return (0, 0) }   // no plists → skip the launchctl shell-out
+        let list = runShell("/bin/launchctl", args: ["list"], timeout: 2)
+        guard list.exitCode == 0 else { return (installed, 0) }
+        let loaded = list.stdout
+            .split(whereSeparator: \.isNewline)
+            .filter { line in
+                let parts = line.split(separator: "\t", omittingEmptySubsequences: false)
+                return parts.count >= 3 && String(parts[2]).hasPrefix("actions.runner.")
+            }
+            .count
+        return (installed, loaded)
     }
 
     // MARK: - Shell helper

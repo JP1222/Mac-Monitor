@@ -39,6 +39,12 @@ struct DeviceSnapshot: Codable {
     let uptimeSeconds: TimeInterval
     let orbStackRunning: Bool
     let dockerContainersRunning: Int
+    // GitHub Actions self-hosted runner LaunchAgents on this Mac: how many are
+    // installed (an actions.runner.*.plist exists) and how many are loaded
+    // (online). The app-side Shared model decodes these as optional, so an
+    // older app keeps working against a newer agent and vice-versa.
+    let runnerAgentsInstalled: Int
+    let runnerAgentsLoaded: Int
     let disks: [DiskUsage]
     let agentVersion: String
 }
